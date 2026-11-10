@@ -30,14 +30,25 @@ Version **0.1.0** · [MIT License](LICENSE)
 
 ## Before you start
 
-You need:
+| | Minimum | Recommended |
+| --- | --- | --- |
+| Memory (RAM) | **8 GB** | 16 GB |
+| Free disk | **30 GB** + your documents | 50 GB + your documents |
+| Processors | 2 | 4 |
+| System | 64-bit Linux (amd64 or arm64) with **sudo** access | |
 
-- A **64-bit Linux** server (Ubuntu, Debian, Rocky, AlmaLinux, Fedora…) with
-  **sudo** access.
-- **8 GB of RAM** (6 GB minimum) and about **20 GB of free disk**.
-- Internet access to download Alfresco.
+You also need Internet access to download Alfresco. If Docker or Python is
+missing, the wizard offers to install it.
 
-Nothing else: if Docker or Python is missing, the wizard offers to install it.
+Before installing, the manager checks your server and shows the result:
+
+![Requirements review before installing](docs/images/requirements-en.png)
+
+- **Memory:** with less than 8 GB it warns that Alfresco will probably fail to
+  start for lack of memory. You may continue at your own risk.
+- **Disk:** with less than 30 GB free it does not install; the images alone
+  take about 11 GB. It also warns if the disk would end up above 85 %, where
+  search stops indexing.
 
 ## Get started
 
@@ -125,6 +136,9 @@ You can delete the downloaded folder after installing.
 ## Help
 
 - **Something does not start:** open **Service → Logs** and pick the service.
+  If services stop on their own, memory is usually short (8 GB minimum).
+- **Disk almost full:** **Health → Health checks** warns from 80 %. Use
+  **Health → Free up space** to remove old versions.
 - **Search does not find something:** in Share, set the scope to
   **Repository** and use `*` to match part of a word (`infor*`). New documents
   take a few seconds to appear.

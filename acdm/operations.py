@@ -17,10 +17,8 @@ from .config import (access_url, applications, engine_of, host, image_tag, initi
 from .core import Error, Runner, confirm, read_json, stage, version_tuple
 from .docker import Engine
 from .maintenance import Maintenance
+from . import requirements
 from .system import host_info, host_timezone
-
-MINIMUM_MEMORY = 6 * 1024 ** 3
-RECOMMENDED_MEMORY = 8 * 1024 ** 3
 
 
 class AdminAuthError(Error):
@@ -73,13 +71,28 @@ class Manager(Maintenance):
     def installation_options(self):
         return self.catalog.bundles(refresh=True)
 
-    @staticmethod
-    def check_memory():
-        memory = host_info().get('memory', 0)
-        if memory and memory < MINIMUM_MEMORY:
-            raise Error('Alfresco necesita al menos 6 GiB de RAM (se recomiendan 8 GiB) / '
-                        'Alfresco needs at least 6 GiB of RAM (8 GiB recommended)')
-        return memory
+    def docker_root(self):
+        """Docker's data folder on this host, where images and Docker volumes live."""
+        root = Runner(self.state).run(['docker', 'info', '--format', '{{.DockerRootDir}}'], check=False).stdout.strip()
+        # A remote socket (test runners) has no local Docker folder: measure the manager's disk instead.
+        return root if root and Path(root).exists() else str(self.state.path)
+
+    def requirements(self, storage='directory', storage_root=None):
+        """RAM, CPU, architecture and disk rows for the review shown before installing."""
+        info = host_info()
+        data = (storage_root or str(self.state.path / 'data')) if storage == 'directory' else None
+        return requirements.evaluate(info.get('memory', 0), info.get('cpus', 0), info.get('architecture', ''),
+                                     self.docker_root(), data)
+
+    def check_requirements(self, storage='directory', storage_root=None):
+        rows = self.requirements(storage, storage_root)
+        problems = requirements.errors(rows)
+        if problems:
+            raise Error('\n'.join(problems))
+        warning = requirements.low_memory(rows)
+        if warning:
+            print('[!] ' + warning, flush=True)
+        return rows
 
     # ------------------------------------------------------------------ install
     def install(self, version=None, *, supplied=None, **settings):
@@ -89,7 +102,7 @@ class Manager(Maintenance):
             bundle = self.catalog.find(version) if version else self.catalog.latest_bundle(refresh=True)
             images = dict(bundle['images'])
             images['proxy'] = self.catalog.latest_proxy()
-        self.check_memory()
+        self.check_requirements(settings.get('storage', 'directory'), settings.get('storage_root'))
         if not settings.get('timezone'):
             settings['timezone'] = host_timezone()
         ipaddress.IPv4Address(settings.get('bind', '127.0.0.1'))
@@ -562,4 +575,4 @@ class Manager(Maintenance):
             path.unlink()
 
 
-__all__ = ['Manager', 'AdminAuthError', 'bundle_changes', 'RECOMMENDED_MEMORY']
+__all__ = ['Manager', 'AdminAuthError', 'bundle_changes']

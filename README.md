@@ -31,15 +31,26 @@ Versión **0.1.0** · [Licencia MIT](LICENSE)
 
 ## Antes de empezar
 
-Necesitas:
+| | Mínimo | Recomendado |
+| --- | --- | --- |
+| Memoria RAM | **8 GB** | 16 GB |
+| Disco libre | **30 GB** + tus documentos | 50 GB + tus documentos |
+| Procesadores | 2 | 4 |
+| Sistema | Linux de 64 bits (amd64 o arm64) con acceso **sudo** | |
 
-- Un servidor **Linux de 64 bits** (Ubuntu, Debian, Rocky, AlmaLinux, Fedora…)
-  con acceso **sudo**.
-- **8 GB de RAM** (mínimo 6 GB) y unos **20 GB libres** en disco.
-- Conexión a internet para descargar Alfresco.
+También necesitas conexión a internet para descargar Alfresco. Si falta Docker
+o Python, el asistente te ofrece instalarlos.
 
-No hace falta instalar nada más: si falta Docker o Python, el asistente te
-ofrece instalarlos.
+Antes de instalar, el gestor revisa tu servidor y te muestra el resultado:
+
+![Revisión de requisitos antes de instalar](docs/images/requirements-es.png)
+
+- **Memoria:** con menos de 8 GB te avisa de que es probable que Alfresco no
+  pueda arrancar por falta de memoria. Puedes continuar bajo tu
+  responsabilidad.
+- **Disco:** con menos de 30 GB libres no deja instalar; las imágenes ya ocupan
+  unos 11 GB. También avisa si el disco quedaría por encima del 85 %, porque a
+  partir de ahí la búsqueda deja de indexar.
 
 ## Empezar
 
@@ -127,7 +138,10 @@ Puedes borrar la carpeta descargada después de instalar.
 
 ## Ayuda
 
-- **Algo no arranca:** abre **Servicio → Registros** y elige el servicio.
+- **Algo no arranca:** abre **Servicio → Registros** y elige el servicio. Si
+  los servicios se cierran solos, suele faltar memoria (mínimo 8 GB).
+- **Disco casi lleno:** **Salud → Comprobaciones de salud** avisa a partir del
+  80 %. Usa **Salud → Liberar espacio** para borrar versiones antiguas.
 - **La búsqueda no encuentra algo:** en Share, cambia el alcance a
   **Repositorio** y usa `*` para buscar parte de una palabra (`infor*`). Los
   documentos nuevos tardan unos segundos en aparecer.

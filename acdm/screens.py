@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo, available_timezones
 
 from .config import DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, access_url, host, image_tag, port, prefer_first_public, public_host
 from .console import Console
-from .core import Cancelled, Error, human
+from .core import Cancelled, Error
 from .dashboard import dashboard
 from .docker import Engine
 from .i18n import messages, remember_language, remembered_language
-from .operations import AdminAuthError, RECOMMENDED_MEMORY
+from .operations import AdminAuthError
 from .system import host_info, host_timezone
 from .terminal_ui import INFO, SEPARATOR, Terminal
 from .views import (SERVICES, bundle_detail, domain_actions, domain_summary,
@@ -284,7 +284,35 @@ class Controller:
             self.view.error(exc, pending=bool(self.state.pending))
             self.notice, self.notice_style = self.term.t('operation_failed'), 'error'
 
+    def review_requirements(self):
+        """Clear view of the server before installing; errors block, warnings only inform."""
+        rows = self.view.run('check_requirements', self.manager.requirements)
+        markers = {'ok': '[+]', 'warning': '[!]', 'error': '[✗]'}
+        lines = []
+        for row in rows:
+            label = self.term.t('req_' + row['key'])
+            note = self.term.t(row['note'], *row['values']) if row['note'] else ''
+            lines.append((INFO, [(markers[row['status']] + ' ', row['status']), (label.ljust(22), ''),
+                                 (row['value'].ljust(12), 'accent'), (note, 'dim' if row['status'] == 'ok' else row['status'])],
+                          row['status']))
+        blocked = any(row['status'] == 'error' for row in rows)
+        warned = any(row['status'] == 'warning' for row in rows)
+        low_memory = any(row['note'] == 'req_memory_low' for row in rows)
+        actions = [('back', '← ' + self.term.t('cancel'), 'accent')]
+        if not blocked:
+            actions.insert(0, ('continue', '▶ ' + self.term.t('requirements_continue'), 'ok'))
+        notice = self.term.t('requirements_blocked' if blocked else 'requirements_memory' if low_memory
+                             else 'requirements_warning' if warned else 'requirements_ok')
+        # With too little RAM the cursor starts on Cancel: continuing must be a deliberate choice.
+        selected = len(lines) + (2 if low_memory and not blocked else 1)
+        choice = self.view.pick('requirements', lines + [(SEPARATOR, '', '')] + actions, selected=selected,
+                                notice=notice, notice_style='error' if blocked else 'warning' if warned else 'ok',
+                                help_text=self.term.t('requirements_help'))
+        return choice == 'continue'
+
     def install(self):
+        if not self.review_requirements():
+            return
         environment = self.pick('environment', ('lan', 'vps'), help_text=self.term.t('environment_help'))
         if environment is None:
             return
@@ -298,8 +326,6 @@ class Controller:
         notes = []
         if bundles[0].get('stale'):
             notes.append(self.term.t('catalog_offline'))
-        if info.get('memory') and info['memory'] < RECOMMENDED_MEMORY:
-            notes.append(self.term.t('memory_low', human(info['memory'])))
         if info['panel_detected']:
             notes.append(self.term.t('ports_existing'))
         if notes:

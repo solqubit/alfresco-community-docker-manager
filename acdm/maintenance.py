@@ -8,7 +8,7 @@ import shutil
 import ssl
 import time
 
-from . import archive
+from . import archive, requirements
 from .core import LABEL, Error, ROOT, Runner, VERSION, atomic, confirm, version_tuple
 from .docker import Engine
 
@@ -57,6 +57,16 @@ class Maintenance:
                 check(function)
         else:
             result['errors'].append('Alfresco está detenido o no está listo / Alfresco is stopped or not ready')
+        try:
+            # Elasticsearch stops indexing at 85 % disk usage and blocks the index at 95 %.
+            for folder in {self.docker_root(), engine.cfg.get('storage_root') if engine.cfg['storage'] == 'directory' else None} - {None}:
+                ratio = requirements.usage_ratio(folder)
+                if ratio >= 0.80:
+                    result['warnings' if ratio < 0.85 else 'errors'].append(
+                        'Disco al %d %% en %s: la búsqueda deja de indexar al 85 %%; libera espacio / '
+                        'Disk at %d %% on %s: search stops indexing at 85 %%; free up space' % (ratio * 100, folder, ratio * 100, folder))
+        except OSError:
+            pass
         result['free_bytes'] = shutil.disk_usage(self.state.path).free
         if result['free_bytes'] < 4 * 1024 ** 3:
             result['errors'].append('Menos de 4 GiB libres para el gestor / Less than 4 GiB free on manager filesystem')
