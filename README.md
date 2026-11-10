@@ -1,0 +1,1 @@
+# alfresco-community-docker-manager
