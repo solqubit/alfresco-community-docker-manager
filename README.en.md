@@ -18,14 +18,19 @@ Version **0.1.0** · [MIT License](LICENSE)
   release and sets everything up: Share, Content App, Control Center,
   Elasticsearch search and a PostgreSQL database.
 - **Stay safe from the start:** the factory `admin/admin` password is replaced
-  with a strong one before any access is opened.
+  with a strong one before any access is opened, and each installation generates
+  its own encryption keys.
 - **Turn on HTTPS:** with your own domain (free Let's Encrypt certificate),
   through Cloudflare Tunnel, or on your local network with a private CA.
 - **Update in one step:** the manager tells you when Alfresco publishes a new
   release and applies it after saving the database. If something fails, it goes
   back to the previous version.
-- **Check health:** services, addresses, logs and health checks, with an
-  optional daily review.
+- **Use the server's memory:** Alfresco gets more memory on servers with 16 GB
+  or more, with nothing to configure.
+- **Send email (optional):** invitations, notifications and tasks through your
+  mail server.
+- **Check health:** services, addresses, logs and health checks whenever you
+  need them.
 - **Change passwords** for any user and **free up space** from old versions.
 
 ## Before you start
@@ -72,8 +77,8 @@ sudo bash start.sh
    - **Local server:** opened from your network, for example `http://192.168.1.10`.
    - **VPS:** at first only reachable through an SSH tunnel (safer), until you
      add your domain.
-3. Review the proposed values (IP, ports, timezone, data folder) and confirm.
-   The first installation takes a few minutes.
+3. Review the proposed values (IP, ports, timezone, data folder and, if you
+   want, outbound email) and confirm. The first installation takes a few minutes.
 
 **3. Sign in to Alfresco**
 
@@ -122,6 +127,37 @@ name, enable HTTPS on both. The CA is the same for all. The list shows each
 address with its type and state, for example
 `https://alfresco.lan · Local name · Local HTTPS on`.
 
+## Outbound email (optional)
+
+Without email Alfresco works the same but sends no site invitations,
+notifications or task emails. Configure it while installing or later in
+**Settings → Outbound email**. You need an SMTP sending account from your mail
+provider or a sending service:
+
+| Setting | Example |
+| --- | --- |
+| SMTP server | `smtp.office365.com`, `smtp.gmail.com`, `mail.yourcompany.com` |
+| Port and security | `587` with STARTTLS (usual), `465` with SSL |
+| Username and password | The sending account (Gmail needs an app password) |
+| Sender | `alfresco@yourcompany.com` |
+
+Before saving, the manager sends a **test message** to confirm the settings
+work. The password is stored privately and never appears in logs. Alfresco
+restarts to apply the change (1-3 minutes).
+
+## Memory
+
+The manager sizes each service from the server RAM:
+
+| Server RAM | Alfresco | Elasticsearch | Transformations | Share |
+| --- | --- | --- | --- | --- |
+| 8 GB | 2 GB | 2 GB | 1.5 GB | 1 GB |
+| 16 GB | 4 GB | 3 GB | 2 GB | 1.5 GB |
+| 32 GB or more | 8 GB | 4 GB | 3 GB | 2 GB |
+
+If you add RAM to your server, it is applied the next time you start Alfresco,
+update or change settings from the manager.
+
 ## Open the manager again
 
 From any folder:
@@ -168,6 +204,9 @@ You can delete the downloaded folder after installing.
   If services stop on their own, memory is usually short (8 GB minimum).
 - **Disk almost full:** **Health → Health checks** warns from 80 %. Use
   **Health → Free up space** to remove old versions.
+- **Emails do not arrive:** **Settings → Outbound email → Send test message**
+  shows why (username or password, blocked port…). Many VPS providers block
+  port 25: use 587.
 - **Search does not find something:** in Share, set the scope to
   **Repository** and use `*` to match part of a word (`infor*`). New documents
   take a few seconds to appear.

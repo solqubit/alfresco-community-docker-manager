@@ -12,8 +12,9 @@ import urllib.parse
 
 from . import archive
 from .catalog import Catalog, same_major
-from .config import (access_url, applications, engine_of, host, image_tag, initial, port, prefer_first_public,
-                     public_host, roles, start_order, validate)
+from . import mailer
+from .config import (access_url, applications, engine_of, host, image_tag, initial, memory_tier, port, prefer_first_public,
+                     public_host, roles, start_order, validate, validate_mail)
 from .core import Error, Runner, confirm, human, read_json, stage, version_tuple
 from .docker import Engine
 from .maintenance import Maintenance
@@ -110,7 +111,34 @@ class Manager(Maintenance):
         return rows
 
     # ------------------------------------------------------------------ install
-    def install(self, version=None, *, supplied=None, **settings):
+    @staticmethod
+    def detected_tier():
+        return memory_tier(host_info().get('memory', 0))
+
+    def refresh_memory(self):
+        """Give the containers the limits that match the server RAM (after a VM resize, for example)."""
+        cfg = self.state.load()
+        tier = self.detected_tier()
+        if self.state.pending or cfg.get('memory_tier', 'base') == tier:
+            return False
+        cfg['memory_tier'] = tier
+        self.state.activate(self.state.revision(cfg))
+        print(f'[*] Memoria de los servicios ajustada a la RAM del servidor / Service memory adjusted to server RAM: {tier}',
+              flush=True)
+        return True
+
+    def generate_keystore(self, image):
+        """This installation's own metadata keystore instead of the one shared by every image."""
+        store, key = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+        script = ('cd /tmp && keytool -genseckey -alias metadata -keyalg DESede -keysize 168 -storetype JCEKS '
+                  '-keystore ks -storepass "$ACDM_STORE" -keypass "$ACDM_KEY" >/dev/null 2>&1 && base64 -w0 ks')
+        # Passwords travel in the environment of this process, never in argv or logs.
+        data = Runner(self.state).run(['docker', 'run', '--rm', '--network', 'none', '--env', 'ACDM_STORE',
+                                       '--env', 'ACDM_KEY', '--entrypoint', 'sh', image, '-ec', script],
+                                      env={'ACDM_STORE': store, 'ACDM_KEY': key}, quiet=True).stdout.strip()
+        return {'data': data, 'store_password': store, 'key_password': key}
+
+    def install(self, version=None, *, supplied=None, mail=None, **settings):
         if self.state.configured:
             raise Error('Ya existe una instalación; usa el menú / Installation already configured')
         with stage('Consultar versiones oficiales / Resolve official releases'):
@@ -118,6 +146,7 @@ class Manager(Maintenance):
             images = dict(bundle['images'])
             images['proxy'] = self.catalog.latest_proxy()
         self.check_requirements(settings.get('storage', 'directory'), settings.get('storage_root'))
+        validate_mail(mail)
         if not settings.get('timezone'):
             settings['timezone'] = host_timezone()
         ipaddress.IPv4Address(settings.get('bind', '127.0.0.1'))
@@ -132,6 +161,11 @@ class Manager(Maintenance):
             images = preflight.pin(images)
         cfg = initial(images, subnet=self.new_subnet(), **settings)
         cfg['bundle'] = bundle['tag']
+        cfg['memory_tier'] = self.detected_tier()
+        with stage('Crear almacén de claves propio / Create own metadata keystore'):
+            cfg['keystore'] = self.generate_keystore(images['alfresco'])
+        if mail:
+            cfg['mail'] = mail
         revision = self.state.revision(cfg)
         engine = Engine(self.state, cfg, revision)
         engine.validate()
@@ -346,11 +380,12 @@ class Manager(Maintenance):
     def settings(self, cfg, supplied=None):
         old_engine = self.ready()
         old = old_engine.cfg
-        for key in ('status', 'admin_password', 'data_device', 'data_fsid'):
+        for key in ('status', 'admin_password', 'data_device', 'data_fsid', 'keystore'):
             if key in old:
                 cfg[key] = old[key]
             else:
                 cfg.pop(key, None)
+        cfg['memory_tier'] = self.detected_tier()
         validate(cfg)
         confirm('APPLY', supplied)
         revision = self.state.revision(cfg)
@@ -411,6 +446,25 @@ class Manager(Maintenance):
             cfg['primary'] = remaining[0]['host']
         self.settings(cfg, supplied)
 
+    # ------------------------------------------------------------------ email
+    def test_mail(self, mail, recipient):
+        """Send a test message with these settings before they are applied."""
+        validate_mail(mail)
+        url = access_url(self.state.load()) if self.state.configured else 'Alfresco'
+        mailer.test(mail, recipient, url)
+        return {'sent_to': recipient}
+
+    def set_mail(self, mail, supplied=None):
+        """Apply, change or remove (None) outbound email; Alfresco restarts to read it."""
+        validate_mail(mail)
+        cfg = self.state.load()
+        if mail:
+            cfg['mail'] = mail
+        else:
+            cfg.pop('mail', None)
+        self.settings(cfg, supplied)
+        return {'mail': 'on' if mail else 'off'}
+
     # ------------------------------------------------------------------ updates
     def checks(self):
         cfg = self.state.load()
@@ -462,6 +516,7 @@ class Manager(Maintenance):
         changed['version'] = image_tag(changed['images']['alfresco'])
         changed['search'] = engine_of(changed['images'])
         changed['bundle'] = bundle['tag']
+        changed['memory_tier'] = self.detected_tier()
         changed['maintenance_gate'] = True
         suffix = secrets.token_hex(4)
         database_migration = not same_major(cfg['images']['postgres'], changed['images']['postgres'])

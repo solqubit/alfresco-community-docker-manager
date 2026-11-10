@@ -258,8 +258,6 @@ class Console:
                 'RESET-PASSWORD': ('confirm_reset_password', 'warning'),
                 'CLEANUP': ('confirm_cleanup', 'warning'),
                 'RESUME': ('confirm_resume', 'warning'),
-                'SCHEDULE-ENABLE': ('confirm_schedule', 'accent'),
-                'SCHEDULE-DISABLE': ('confirm_disable_schedule', 'warning'),
             }.get(expected, ('confirm_operation', 'accent'))
         if expected == 'INSTALL':
             summary = '\n'.join(str(label) + ': ' + str(value) for label, value in self.context)

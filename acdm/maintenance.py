@@ -1,4 +1,4 @@
-"""Read-only daily health checks, HTTPS certificates, cleanup, scheduling and self-update."""
+"""Health checks run from the menu, HTTPS certificates, cleanup and self-update."""
 import ast
 import datetime as dt
 import json
@@ -188,38 +188,6 @@ class Maintenance:
                 if not valid or max(valid) < threshold:
                     raise Error('Certificado a punto de caducar; revisa los registros de Caddy: %s / Certificate is near expiry; inspect Caddy logs: %s' % ((entry['host'],) * 2))
         return certificates
-
-    def schedule_enabled(self):
-        """None without systemd; otherwise whether this installation's daily timer exists."""
-        if not Path('/run/systemd/system').exists():
-            return None
-        return (Path('/etc/systemd/system') / f"alfresco-manager-{self.state.load()['id']}.timer").exists()
-
-    def schedule(self, action, supplied=None):
-        if not Path('/run/systemd/system').exists():
-            raise Error('La programación requiere systemd / Scheduling requires a Linux host running systemd')
-        name = 'alfresco-manager-' + self.state.load()['id']
-        service, timer = (Path('/etc/systemd/system') / (name + ext) for ext in ('.service', '.timer'))
-        runner = Runner(self.state)
-        if action == 'status':
-            return runner.run(['systemctl', 'status', name + '.timer', '--no-pager'], check=False).stdout
-        confirm('SCHEDULE-' + action.upper(), supplied)
-        if action == 'enable':
-            if not (self.state.path / 'manager' / 'start.sh').exists():
-                self.state.installed_code()
-            invocation = ' '.join(json.dumps(str(v).replace('%', '%%')) for v in ('/bin/bash', self.state.path / 'start.sh', 'maintenance'))
-            atomic(service, '[Unit]\nDescription=Alfresco manager health and update checks\nAfter=docker.service\n'
-                   '[Service]\nType=oneshot\nUMask=0077\nExecStart=' + invocation + '\n', 0o644)
-            atomic(timer, '[Unit]\nDescription=Daily Alfresco manager checks\n[Timer]\nOnCalendar=daily\n'
-                   'RandomizedDelaySec=1h\nPersistent=true\n[Install]\nWantedBy=timers.target\n', 0o644)
-            runner.run(['systemctl', 'daemon-reload'])
-            runner.run(['systemctl', 'enable', '--now', name + '.timer'])
-        else:
-            runner.run(['systemctl', 'disable', '--now', name + '.timer'])
-            service.unlink(missing_ok=True)
-            timer.unlink(missing_ok=True)
-            runner.run(['systemctl', 'daemon-reload'])
-        return {'schedule': action, 'updates_applied_automatically': False}
 
     def self_update(self, source=None, supplied=None):
         source = Path(source).resolve() if source else ROOT

@@ -142,7 +142,7 @@ class State:
         self.locked = False
 
     def open(self, allow_busy=False):
-        """allow_busy lets read-only work (the scheduled health check) run while an
+        """allow_busy lets read-only work (the health check) run while an
         interactive session holds the lock; `locked` then stays False."""
         import fcntl
         if self.path.exists():

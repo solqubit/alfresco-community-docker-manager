@@ -7,7 +7,7 @@ from .terminal_ui import curses
 GROUPS = [
     ('group_service', ('status', 'start', 'stop', 'logs')),
     ('group_data', ('updates', 'recover')),
-    ('group_settings', ('domains', 'language')),
+    ('group_settings', ('domains', 'mail', 'language')),
     ('group_accounts', ('reset_password', 'credentials')),
     ('group_checks', ('maintenance', 'cleanup')),
     ('group_manager', ('self_update', 'exit')),

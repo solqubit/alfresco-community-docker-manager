@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import secrets
+import shlex
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -46,6 +47,54 @@ KEYSTORE_OPTIONS = ('-Dencryption.keystore.type=JCEKS -Dencryption.cipherAlgorit
                     '-Dencryption.keystore.location=/usr/local/tomcat/shared/classes/alfresco/extension/keystore/keystore '
                     '-Dmetadata-keystore.password=mp6yc0UD9e -Dmetadata-keystore.aliases=metadata '
                     '-Dmetadata-keystore.metadata.password=oKIWzVdEdA -Dmetadata-keystore.metadata.algorithm=DESede')
+
+
+# Container memory limits by server RAM. Java uses up to 80 % of its container (MaxRAMPercentage);
+# Elasticsearch gets a fixed heap of half its container. «base» is the measured 8 GB footprint.
+MEMORY_TIERS = {
+    'base': {'alfresco': '2g', 'elasticsearch': '2g', 'es_heap': '1g', 'transform-core-aio': '1536m',
+             'share': '1g', 'postgres': '1g', 'shared_buffers': '256MB'},
+    'medium': {'alfresco': '4g', 'elasticsearch': '3g', 'es_heap': '1536m', 'transform-core-aio': '2g',
+               'share': '1536m', 'postgres': '2g', 'shared_buffers': '512MB'},
+    'large': {'alfresco': '8g', 'elasticsearch': '4g', 'es_heap': '2g', 'transform-core-aio': '3g',
+              'share': '2g', 'postgres': '4g', 'shared_buffers': '1GB'},
+}
+EMAIL = r'[^\s@{}"\\<>]+@[^\s@{}"\\<>]+\.[^\s@{}"\\<>]+'
+MAIL_SECURITY = ('starttls', 'ssl', 'none')
+KEYSTORE_PATH = '/tmp/acdm-keystore/keystore'
+
+
+def memory_tier(memory):
+    """A server sold with 16 GB reports about 15.6 GiB to Linux and one with 32 GB about 31 GiB."""
+    gib = 1024 ** 3
+    return 'large' if memory >= 30 * gib else 'medium' if memory >= 15 * gib else 'base'
+
+
+def validate_mail(mail):
+    """Optional outbound SMTP settings; None means Alfresco sends no email."""
+    if mail is None:
+        return
+    if not isinstance(mail, dict) or set(mail) != {'host', 'port', 'security', 'username', 'password', 'sender'}:
+        raise Error('Invalid email settings')
+    host(mail['host'])
+    port(mail['port'])
+    if mail['security'] not in MAIL_SECURITY:
+        raise Error('Invalid email settings')
+    if not re.fullmatch(EMAIL, mail['sender']):
+        raise Error('Remitente inválido / Invalid sender address')
+    for key in ('username', 'password'):
+        value = mail[key]
+        if not isinstance(value, str) or len(value) > 256 or any(ord(c) < 32 for c in value):
+            raise Error('Invalid email credentials')
+
+
+def validate_keystore(keystore):
+    if keystore is None:
+        return
+    if (not isinstance(keystore, dict) or set(keystore) != {'data', 'store_password', 'key_password'}
+            or not re.fullmatch(r'[A-Za-z0-9+/=]{100,8000}', keystore['data'])
+            or not all(re.fullmatch(r'[A-Za-z0-9_-]{16,128}', keystore[key]) for key in ('store_password', 'key_password'))):
+        raise Error('Invalid metadata keystore')
 
 
 def host(value):
@@ -194,6 +243,10 @@ def validate(cfg):
     for secret in ('db_password', 'search_secret', 'mq_password'):
         if not re.fullmatch(r'[A-Za-z0-9_-]{16,128}', cfg[secret]):
             raise Error('Invalid generated secret')
+    if cfg.get('memory_tier', 'base') not in MEMORY_TIERS:
+        raise Error('Invalid memory profile')
+    validate_mail(cfg.get('mail'))
+    validate_keystore(cfg.get('keystore'))
     # The administrator may later choose any password; it is only sent to Alfresco's API.
     admin = cfg['admin_password']
     if not isinstance(admin, str) or not 1 <= len(admin) <= 256 or any(ord(c) < 32 for c in admin):
@@ -337,6 +390,36 @@ def caddyfile(cfg):
     return '\n'.join(lines) + '\n'
 
 
+def keystore_options(cfg):
+    """Alfresco's metadata keystore: the image default (documented passwords) or this installation's own."""
+    keystore = cfg.get('keystore')
+    if not keystore:
+        return KEYSTORE_OPTIONS
+    return ('-Dencryption.keystore.type=JCEKS -Dencryption.cipherAlgorithm=DESede/CBC/PKCS5Padding '
+            '-Dencryption.keyAlgorithm=DESede -Dencryption.keystore.location=' + KEYSTORE_PATH + ' '
+            '-Dmetadata-keystore.password=' + keystore['store_password'] + ' -Dmetadata-keystore.aliases=metadata '
+            '-Dmetadata-keystore.metadata.password=' + keystore['key_password'] +
+            ' -Dmetadata-keystore.metadata.algorithm=DESede')
+
+
+def mail_options(mail):
+    """Outbound email for Alfresco. catalina.sh evaluates JAVA_OPTS with the shell, so every value
+    supplied by the administrator is shell-quoted."""
+    if not mail:
+        return []
+    quote = shlex.quote
+    auth = 'true' if mail['username'] else 'false'
+    options = ['-Dmail.host=' + quote(mail['host']), f"-Dmail.port={int(mail['port'])}",
+               '-Dmail.protocol=' + ('smtps' if mail['security'] == 'ssl' else 'smtp'),
+               '-Dmail.smtp.auth=' + auth, '-Dmail.smtps.auth=' + auth,
+               '-Dmail.smtp.starttls.enable=' + ('true' if mail['security'] == 'starttls' else 'false'),
+               '-Dmail.from.default=' + quote(mail['sender']), '-Dmail.from.enabled=false', '-Dmail.encoding=UTF-8',
+               '-Dmail.smtp.timeout=30000', '-Dmail.smtp.connectiontimeout=30000']
+    if mail['username']:
+        options += ['-Dmail.username=' + quote(mail['username']), '-Dmail.password=' + quote(mail['password'])]
+    return options
+
+
 def java_options(cfg):
     scheme, name, value = endpoint(cfg)
     options = ['-Ddb.driver=org.postgresql.Driver', '-Ddb.username=alfresco', '-Ddb.password=' + cfg['db_password'],
@@ -352,6 +435,7 @@ def java_options(cfg):
                 '-Dmessaging.broker.username=admin', '-Dmessaging.broker.password=' + cfg['mq_password'],
                 '-Ddeployment.method=DOCKER_COMPOSE', '-DlocalTransform.core-aio.url=http://transform-core-aio:8090/',
                 '-Duser.timezone=' + cfg['timezone'], '-XX:MinRAMPercentage=50', '-XX:MaxRAMPercentage=80']
+    options += mail_options(cfg.get('mail'))
     return ' '.join(options)
 
 
@@ -365,11 +449,13 @@ def compose(cfg):
     scheme, name, value = endpoint(cfg)
     origin, referer = csrf_patterns(cfg)
     ready = 'http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-'
+    memory = MEMORY_TIERS[cfg.get('memory_tier', 'base')]
     services = {
-        'postgres': {'image': images['postgres'], 'mem_limit': '1g',
+        'postgres': {'image': images['postgres'], 'mem_limit': memory['postgres'],
             'environment': {'POSTGRES_PASSWORD': cfg['db_password'], 'POSTGRES_USER': 'alfresco',
                             'POSTGRES_DB': 'alfresco', 'PGDATA': '/var/lib/postgresql/data/pgdata', 'TZ': tz},
-            'command': ['postgres', '-c', 'max_connections=300', '-c', 'log_min_messages=LOG'],
+            'command': ['postgres', '-c', 'max_connections=300', '-c', 'log_min_messages=LOG',
+                        '-c', 'shared_buffers=' + memory['shared_buffers']],
             'volumes': ['db:/var/lib/postgresql/data'], 'networks': ['backend'],
             'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -d alfresco -U alfresco'],
                             'interval': '10s', 'timeout': '5s', 'retries': 30, 'start_period': '20s'}},
@@ -379,21 +465,23 @@ def compose(cfg):
             'healthcheck': {'test': ['CMD-SHELL', '/opt/activemq/bin/activemq query --objname '
                                      '"type=Broker,brokerName=*,service=Health" | grep -q Good'],
                             'interval': '20s', 'timeout': '30s', 'retries': 15, 'start_period': '30s'}},
-        'transform-core-aio': {'image': images['transform-core-aio'], 'mem_limit': '1536m',
+        'transform-core-aio': {'image': images['transform-core-aio'], 'mem_limit': memory['transform-core-aio'],
             'environment': {'JAVA_OPTS': '-XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80',
                             'ACTIVEMQ_URL': 'nio://activemq:61616', 'ACTIVEMQ_USER': 'admin',
                             'ACTIVEMQ_PASSWORD': cfg['mq_password'], 'TZ': tz},
             'networks': ['backend'], 'depends_on': {'activemq': {'condition': 'service_healthy'}},
             'healthcheck': {'test': ['CMD', 'curl', '-f', 'http://localhost:8090/ready'],
                             'interval': '20s', 'timeout': '5s', 'retries': 15, 'start_period': '30s'}},
-        'alfresco': {'image': images['alfresco'], 'mem_limit': '2g',
-            'environment': {'JAVA_TOOL_OPTIONS': KEYSTORE_OPTIONS, 'JAVA_OPTS': java_options(cfg), 'TZ': tz},
+        'alfresco': {'image': images['alfresco'], 'mem_limit': memory['alfresco'],
+            # In JAVA_OPTS, not JAVA_TOOL_OPTIONS: the JVM prints JAVA_TOOL_OPTIONS (with the keystore
+            # passwords) to the log, while Tomcat is configured not to log JAVA_OPTS (logArgs="false").
+            'environment': {'JAVA_OPTS': keystore_options(cfg) + ' ' + java_options(cfg), 'TZ': tz},
             'volumes': ['content:/usr/local/tomcat/alf_data'], 'networks': ['backend', 'proxy'],
             'depends_on': {'postgres': {'condition': 'service_healthy'},
                            'activemq': {'condition': 'service_healthy'}},
             'healthcheck': {'test': ['CMD', 'curl', '-f', ready],
                             'interval': '15s', 'timeout': '5s', 'retries': 20, 'start_period': '3m'}},
-        'share': {'image': images['share'], 'mem_limit': '1g',
+        'share': {'image': images['share'], 'mem_limit': memory['share'],
             'environment': {'CSRF_FILTER_ORIGIN': sed_replacement(origin), 'CSRF_FILTER_REFERER': sed_replacement(referer),
                             'REPO_HOST': 'alfresco', 'REPO_PORT': '8080', 'TZ': tz,
                             'JAVA_OPTS': f'-XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80 -Dalfresco.host={name} '
@@ -420,9 +508,9 @@ def compose(cfg):
                       {'target': 443, 'published': str(cfg['https_port']), 'host_ip': cfg['bind']}],
             'healthcheck': {'test': ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/acdm-health'],
                             'interval': '10s', 'timeout': '5s', 'retries': 12}}}
-    services['elasticsearch'] = {'image': images['elasticsearch'], 'mem_limit': '2g',
+    services['elasticsearch'] = {'image': images['elasticsearch'], 'mem_limit': memory['elasticsearch'],
         'environment': {'xpack.security.enabled': 'false', 'discovery.type': 'single-node',
-                        'ES_JAVA_OPTS': '-Xms1g -Xmx1g', 'TZ': tz},
+                        'ES_JAVA_OPTS': f"-Xms{memory['es_heap']} -Xmx{memory['es_heap']}", 'TZ': tz},
         'ulimits': {'memlock': {'soft': -1, 'hard': -1}, 'nofile': {'soft': 65536, 'hard': 65536}},
         'cap_add': ['IPC_LOCK'], 'volumes': ['search:' + SEARCH_MOUNTS['elasticsearch']], 'networks': ['backend'],
         'healthcheck': {'test': ['CMD-SHELL', 'curl -s http://localhost:9200/_cluster/health | grep -Eq \'"status":"(green|yellow)"\''],
@@ -446,6 +534,12 @@ def compose(cfg):
                        'alfresco': {'condition': 'service_healthy'},
                        'transform-core-aio': {'condition': 'service_healthy'}}}
     services['alfresco']['depends_on']['elasticsearch'] = {'condition': 'service_healthy'}
+    if cfg.get('keystore'):
+        # The image's extension folder belongs to root: write the keystore where Alfresco can read it.
+        services['alfresco']['environment']['ACDM_KEYSTORE'] = cfg['keystore']['data']
+        services['alfresco']['entrypoint'] = ['/bin/sh', '-ec', 'umask 077; mkdir -p ' + KEYSTORE_PATH.rpartition('/')[0]
+                                              + '; printf "%s" "$ACDM_KEYSTORE" | base64 -d > ' + KEYSTORE_PATH
+                                              + '; exec catalina.sh run -security']
     for service_name, service in services.items():
         service.update(restart='unless-stopped', logging=logging,
                        labels={**labels, LABEL + '.role': service_name})

@@ -4,11 +4,13 @@ from __future__ import annotations
 import copy
 import ipaddress
 from pathlib import Path
+import re
 import tarfile
 import traceback
 from zoneinfo import ZoneInfo, available_timezones
 
-from .config import DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, access_url, host, image_tag, port, prefer_first_public, public_host
+from .config import (DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, EMAIL, MAIL_SECURITY, access_url, host, image_tag, port,
+                     prefer_first_public, public_host)
 from .console import Console
 from .core import Cancelled, Error
 from .dashboard import dashboard
@@ -30,8 +32,10 @@ def folder(value):
 
 class Form:
     """In-memory drafts. Escape never writes configuration or changes services."""
-    def __init__(self, console, title, data, fields, *, installed=False, submit=None, bundles=None):
+    def __init__(self, console, title, data, fields, *, installed=False, submit=None, bundles=None, editors=None):
         self.view, self.ui, self.title = console, console.term, title
+        # Fields edited by their own screen (the optional outbound email of the installation).
+        self.editors = editors or {}
         # Official release bundles, newest first; an older one demonstrates updates.
         self.bundles = bundles or []
         self.data, self.original = copy.deepcopy(data), copy.deepcopy(data)
@@ -50,11 +54,21 @@ class Form:
         if key in ('environment', 'storage', 'publish', 'local_tls'):
             return self.ui.t(('environment_' + value) if key == 'environment' else
                              ('yes' if value else 'no') if key in ('publish', 'local_tls') else value)
-        return str(value) if value != '' else self.ui.t('optional' if key == 'email' else 'pending_value')
+        if key == 'mail':
+            return f"{value['host']}:{value['port']} · {value['sender']}" if value else self.ui.t('mail_off')
+        if key == 'security':
+            return self.ui.t('mail_security_' + value)
+        if key == 'password':
+            return '••••••••' if value else self.ui.t('optional')
+        return str(value) if value != '' else self.ui.t('optional' if key in ('email', 'username') else 'pending_value')
 
     def normalize(self, key, value):
-        if key.endswith('_port'):
+        if key.endswith('_port') or key == 'port':
             return port(value)
+        if key == 'host':
+            return host(value)
+        if key == 'sender' and not re.fullmatch(EMAIL, value):
+            raise Error(self.ui.t('invalid_email'))
         if key == 'bind':
             return str(ipaddress.IPv4Address(value))
         if key in ('address', 'name'):
@@ -83,7 +97,7 @@ class Form:
         rows = []
         for key in self.fields:
             invalid = self.problem(key)
-            pending = key == 'name' and not self.data[key] and self.invalid != key
+            pending = key in ('name', 'host', 'sender') and not self.data[key] and self.invalid != key
             changed = self.data[key] != self.original[key]
             state = self.ui.t('pending_value' if pending else 'field_invalid' if invalid else 'field_changed' if changed else
                               'field_current' if self.installed else 'field_default')
@@ -126,7 +140,18 @@ class Form:
 
     def edit(self, key):
         data, value = self.data, None
-        if key in ('environment', 'storage', 'publish', 'local_tls'):
+        if key in self.editors:
+            value = self.editors[key](data[key])
+        elif key == 'security':
+            value = self.view.pick('field_security', [(v, self.display(key, v), '') for v in MAIL_SECURITY],
+                                   selected=MAIL_SECURITY.index(data[key]), help_text=self.ui.t('field_help_security'))
+            # Keep the usual port of each security type unless a custom one was typed.
+            usual = {'starttls': 587, 'ssl': 465, 'none': 25}
+            if value is not None and data.get('port') in usual.values():
+                data['port'] = usual[value]
+        elif key == 'password':
+            value = self.view.edit('field_password', data[key], secret=True, hint=self.ui.t('field_help_password'))
+        elif key in ('environment', 'storage', 'publish', 'local_tls'):
             values = {'environment': ['lan', 'vps'], 'storage': ['directory', 'named'], 'publish': [False, True],
                       'local_tls': [False, True]}[key]
             value = self.view.pick('field_local_tls' if key == 'local_tls' else key,
@@ -334,8 +359,9 @@ class Controller:
         address = info['address'] if environment == 'lan' else '127.0.0.1'
         data = dict(version=bundles[0]['version'], environment=environment, bind=address, address=address,
                     http_port=DEFAULT_HTTP_PORT, https_port=DEFAULT_HTTPS_PORT, timezone=host_timezone(),
-                    storage='directory', storage_root=str(self.state.path / 'data'))
-        form = Form(self.view, 'configure', data, tuple(data), submit='install', bundles=bundles)
+                    storage='directory', storage_root=str(self.state.path / 'data'), mail=None)
+        form = Form(self.view, 'configure', data, tuple(data), submit='install', bundles=bundles,
+                    editors={'mail': self.mail_choice})
         notes = []
         if bundles[0].get('stale'):
             notes.append(self.term.t('catalog_offline'))
@@ -356,10 +382,11 @@ class Controller:
                 form.notice, form.notice_style, form.reviewing = self.view.local(str(exc)), 'error', False
                 continue
             version = draft.pop('version')
+            mail = draft.pop('mail') or None
             bundle = next(b for b in bundles if b['version'] == version)
             local_url = f'http://{draft["address"]}' + (f':{draft["http_port"]}' if draft['http_port'] != 80 else '')
             try:
-                self.perform('install', lambda: self.manager.install(version, language=self.language, **draft),
+                self.perform('install', lambda: self.manager.install(version, language=self.language, mail=mail, **draft),
                              context=[('Alfresco Community', f'{version} ({bundle["tag"]})'),
                                       (self.term.t('search_engine'), self.term.t('search_' + bundle['search'])),
                                       ('PostgreSQL', image_tag(bundle['images']['postgres'])),
@@ -370,6 +397,77 @@ class Controller:
                 form.notice, form.notice_style = self.term.t('install_cancelled'), 'accent'
                 continue
             return
+
+    def mail_choice(self, current):
+        """Installation field: configure outbound email now, or leave it for later."""
+        choice = self.view.pick('field_mail', [('configure', self.term.t('mail_configure_now'), 'ok'),
+                                               ('off', self.term.t('mail_later'), '')],
+                                selected=0, help_text=self.term.t('field_help_mail'))
+        if choice == 'off':
+            return False
+        return self.mail_form(current) if choice == 'configure' else None
+
+    def mail_form(self, current=None):
+        """SMTP settings, verified with a test message before they are used."""
+        data = dict(current or {'host': '', 'port': 587, 'security': 'starttls', 'username': '', 'password': '', 'sender': ''})
+        form = Form(self.view, 'mail', data, ('host', 'port', 'security', 'username', 'password', 'sender'),
+                    submit='mail_test_save', installed=bool(current))
+        form.notice = self.term.t('mail_form_help')
+        while True:
+            draft = form.run()
+            if draft is None:
+                return None
+            recipient = self.view.edit('mail_test_to', draft['sender'], hint=self.term.t('mail_test_help'),
+                                       normalize=lambda value: value if re.fullmatch(EMAIL, value) else self.invalid_email())
+            if recipient is None:
+                form.data = draft
+                continue
+            try:
+                self.view.run('mail_test', lambda: self.manager.test_mail(draft, recipient))
+            except Error as exc:
+                choice = self.view.pick('mail_test_failed', [('edit', '← ' + self.term.t('return_edit'), 'accent'),
+                                                             ('save', self.term.t('mail_save_anyway'), 'warning')],
+                                        notice=self.view.local(str(exc)), notice_style='error')
+                if choice != 'save':
+                    form.data, form.notice, form.notice_style = draft, self.view.local(str(exc)), 'error'
+                    continue
+            return draft
+
+    def invalid_email(self):
+        raise Error(self.term.t('invalid_email'))
+
+    def mail(self):
+        while True:
+            mail = self.state.load().get('mail')
+            notice = (self.term.t('mail_state_on', f"{mail['host']}:{mail['port']}", mail['sender']) if mail
+                      else self.term.t('mail_state_off'))
+            notice, tone = self.notice_for(notice)
+            rows = [('configure', self.term.t('mail_change' if mail else 'mail_configure'), 'ok')]
+            if mail:
+                rows += [('test', self.term.t('mail_send_test'), 'accent'), ('disable', self.term.t('mail_disable'), 'warning')]
+            choice = self.menu('mail', rows, notice=notice, notice_style=tone,
+                               help_text=lambda key: self.term.t('mail_help_' + key))
+            if choice is None:
+                return
+            self.attempt(lambda: self.mail_action(choice, mail))
+
+    def mail_action(self, choice, mail):
+        if choice == 'configure':
+            new = self.mail_form(mail)
+            if new:
+                self.perform('mail', lambda: self.manager.set_mail(new), notice=self.term.t('mail_saved'))
+        elif choice == 'test':
+            recipient = self.view.edit('mail_test_to', mail['sender'], hint=self.term.t('mail_test_help'),
+                                       normalize=lambda value: value if re.fullmatch(EMAIL, value) else self.invalid_email())
+            if recipient:
+                self.perform('mail_test', lambda: self.manager.test_mail(mail, recipient),
+                             notice=self.term.t('mail_test_sent', recipient))
+        elif choice == 'disable':
+            confirm = self.view.pick('mail_disable', [('back', '← ' + self.term.t('cancel'), 'accent'),
+                                                      ('disable', self.term.t('mail_disable'), 'warning')],
+                                     notice=self.term.t('mail_disable_help'), notice_style='warning')
+            if confirm == 'disable':
+                self.perform('mail', lambda: self.manager.set_mail(None), notice=self.term.t('mail_disabled'))
 
     def domains(self):
         while True:
@@ -558,21 +656,8 @@ class Controller:
             self.attempt(show)
 
     def maintenance(self):
-        while True:
-            enabled = self.manager.schedule_enabled()
-            rows = [('run_checks', self.term.t('run_checks'), 'ok')]
-            if enabled is not None:
-                rows += [('disable', self.term.t('disable'), 'warning') if enabled else ('enable', self.term.t('enable'), 'accent'),
-                         ('schedule_status', self.term.t('schedule_status'), '')]
-            state = self.term.t('schedule_unavailable' if enabled is None else 'schedule_on' if enabled else 'schedule_off')
-            notice, tone = self.notice_for(state)
-            selected = self.menu('maintenance', rows, notice=notice, notice_style=tone,
-                                 help_text=self.term.t('maintenance_help'))
-            if not selected:
-                return
-            lookup = {'enable': 'enable', 'disable': 'disable', 'schedule_status': 'status'}
-            self.attempt(lambda: self.perform('maintenance', self.manager.maintenance if selected == 'run_checks'
-                                              else lambda: self.manager.schedule(lookup[selected])))
+        """Run the health checks once, when the administrator asks for them."""
+        self.perform('maintenance', self.manager.maintenance)
 
     def ask_admin_password(self):
         """The stored admin password stopped working (changed in Share): ask for the current one."""
@@ -630,7 +715,7 @@ class Controller:
                 remember_language(self.state, selected)
                 self.notice, self.notice_style = self.term.t('language_changed'), 'ok'
             return
-        if action in ('install', 'domains', 'recover', 'updates', 'logs', 'maintenance', 'reset_password'):
+        if action in ('install', 'domains', 'mail', 'recover', 'updates', 'logs', 'maintenance', 'reset_password'):
             return getattr(self, action)()
         if action == 'credentials':
             return self.report('credentials', self.manager.credentials(self.state.load()))

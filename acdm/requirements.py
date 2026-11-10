@@ -1,4 +1,4 @@
-"""Server requirements checked before installing (and disk headroom checked daily).
+"""Server requirements checked before installing (disk headroom is also part of the health checks).
 
 Measured on Alfresco 26.2: the containers use about 6.7 GiB at rest and may grow to their
 10 GiB limits; Linux needs about 1 GiB more. The images take about 8 GiB unpacked plus about

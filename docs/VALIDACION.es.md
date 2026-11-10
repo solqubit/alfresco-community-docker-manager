@@ -3,7 +3,11 @@
 > **Cambios posteriores a esta validación (10 de noviembre de 2026):**
 > - Se retiró el soporte de Solr. El gestor solo instala y actualiza versiones con Elasticsearch (Alfresco 26.2 o posterior). Las filas sobre la instalación 26.1 con Solr y su paso a Elasticsearch quedan como registro histórico.
 > - Se retiraron los respaldos manuales (`backup`, `verify-backup`, `restore` y el menú **Respaldos**). Solo queda el respaldo automático de base de datos y certificados antes de cada actualización. **Recuperar → Volver a la versión anterior** lo restaura sin tocar los documentos. Las filas sobre respaldos completos y restauraciones manuales quedan como registro histórico.
-> - Después de estos cambios: 38 pruebas unitarias correctas; la instalación de prueba 26.2.0 se reconfiguró con la versión nueva y siguió respondiendo (Share, búsqueda por nombre y contenido); el panel curses ya no muestra **Respaldos**.
+> - Se retiró la comprobación diaria programada (temporizador de systemd); **Comprobaciones de salud** queda como acción manual.
+> - Correo saliente opcional, probado con un servidor SMTP de pruebas (Mailpit) que exige autenticación y una contraseña con comillas, `$` y comillas invertidas: se rechazó la contraseña incorrecta, llegó el correo de prueba del gestor y Alfresco envió su propia notificación de tarea con el remitente configurado.
+> - Memoria según la RAM: la instalación de prueba (30 GiB) pasó al perfil grande (Alfresco 8 GiB, Elasticsearch 4 GiB) y siguió sana.
+> - Almacén de claves propio: una instalación nueva lo generó con `keytool`, Alfresco arrancó sin errores de claves, volvió a arrancar tras reiniciar el contenedor y los registros no contienen contraseñas. La instalación temporal se eliminó después.
+> - Después de los primeros cambios: 38 pruebas unitarias correctas; la instalación de prueba 26.2.0 se reconfiguró con la versión nueva y siguió respondiendo (Share, búsqueda por nombre y contenido); el panel curses ya no muestra **Respaldos**.
 
 10 de noviembre de 2026. Windows 11 con Docker Desktop, motor Linux amd64, aproximadamente 30 GiB disponibles para Docker y Python 3.12 en `acdm-test-runner:local`. El gestor se ejecutó dentro de contenedores con el socket Docker del host. Se siguieron los patrones de `nextcloud-docker-manager/tests/run-integration.ps1` y su informe de validación.
 

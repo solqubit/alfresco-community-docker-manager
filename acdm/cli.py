@@ -70,8 +70,18 @@ def parser():
     child = sub.add_parser('logs')
     child.add_argument('service', choices=SERVICE_CHOICES)
     child.add_argument('--tail', type=int, default=100)
-    child = sub.add_parser('schedule')
-    child.add_argument('action', choices=['enable', 'disable', 'status'])
+    for name in ('mail-set', 'mail-test'):
+        child = sub.add_parser(name, help='Outbound email used by Alfresco (password read from stdin)')
+        child.add_argument('--host', required=True)
+        child.add_argument('--port', type=int, default=587)
+        child.add_argument('--security', choices=['starttls', 'ssl', 'none'], default='starttls')
+        child.add_argument('--username', default='')
+        child.add_argument('--password-stdin', action='store_true')
+        child.add_argument('--sender', required=True)
+        child.add_argument('--test-to', help='Send a test message here before applying' if name == 'mail-set'
+                           else 'Recipient of the test message', required=name == 'mail-test')
+        child.add_argument('--confirm')
+    child = sub.add_parser('mail-disable')
     child.add_argument('--confirm')
     child = sub.add_parser('update-component')
     child.add_argument('component', choices=['proxy', 'postgres'])
@@ -96,6 +106,12 @@ def show(value):
 def menu(manager, language=None, console=None):
     from .screens import Controller
     Controller(manager, language, console).run()
+
+
+def mail_settings(args):
+    password = sys.stdin.readline().rstrip('\n') if args.password_stdin else ''
+    return {'host': args.host, 'port': args.port, 'security': args.security, 'username': args.username,
+            'password': password, 'sender': args.sender}
 
 
 def dispatch(manager, args):
@@ -144,6 +160,8 @@ def dispatch(manager, args):
     if command == 'start':
         if state.pending:
             raise Error('Hay una operación pendiente: usa Recuperar / Pending operation: use recover')
+        if manager.refresh_memory():
+            engine = Engine(state)
         engine.up(timeout=3600)
         engine.wait_healthy(*start_order(engine.cfg), timeout=3600)
         return engine.status()
@@ -159,8 +177,13 @@ def dispatch(manager, args):
                 'last_maintenance': read_json(last) if last.exists() else None}
     if command == 'maintenance':
         return manager.maintenance()
-    if command == 'schedule':
-        return manager.schedule(args.action, args.confirm)
+    if command in ('mail-set', 'mail-test'):
+        mail = mail_settings(args)
+        if args.test_to:
+            manager.test_mail(mail, args.test_to)
+        return manager.set_mail(mail, args.confirm) if command == 'mail-set' else {'sent_to': args.test_to}
+    if command == 'mail-disable':
+        return manager.set_mail(None, args.confirm)
     if command == 'update-component':
         return manager.update_component(args.component, args.confirm)
     if command == 'reset-password':
@@ -184,7 +207,8 @@ def main(argv=None):
             raise Error('Run this installer on Linux. Use a Linux Docker runner for Windows tests.')
         state = State(args.state_dir).open(allow_busy=args.command == 'maintenance')
         interactive = args.command in (None, 'menu')
-        visual = interactive or (sys.stdin.isatty() and sys.stdout.isatty() and args.command != 'reset-password')
+        visual = interactive or (sys.stdin.isatty() and sys.stdout.isatty()
+                                 and args.command not in ('reset-password', 'mail-set', 'mail-test'))
         startup_language = os.environ.pop('ACDM_STARTUP_LANGUAGE', None)
         language = args.lang or (startup_language if startup_language in ('es', 'en') else None) or remembered_language(state)
         console = Console(Terminal(messages(language or 'es')), state) if visual else None

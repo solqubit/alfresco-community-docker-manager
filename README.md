@@ -18,14 +18,19 @@ Versión **0.1.0** · [Licencia MIT](LICENSE)
   reciente y deja todo listo: Share, Content App, Control Center, búsqueda con
   Elasticsearch y base de datos PostgreSQL.
 - **Entrar con seguridad desde el primer momento:** la contraseña de fábrica
-  `admin/admin` se cambia sola por una segura antes de abrir el acceso.
+  `admin/admin` se cambia sola por una segura antes de abrir el acceso, y cada
+  instalación genera sus propias claves de cifrado.
 - **Activar HTTPS:** con tu dominio (certificado gratuito de Let's Encrypt),
   con Cloudflare Tunnel o en tu red local con una CA propia.
 - **Actualizar con un clic:** el gestor avisa cuando Alfresco publica una
   versión nueva y la aplica guardando antes la base de datos. Si algo falla,
   vuelve a la versión anterior.
+- **Aprovechar la memoria del servidor:** Alfresco usa más memoria si el
+  servidor tiene 16 GB o más, sin configurar nada.
+- **Enviar correos (opcional):** invitaciones, notificaciones y tareas, con tu
+  servidor de correo.
 - **Revisar el estado:** servicios, direcciones, registros y comprobaciones de
-  salud, con una revisión diaria opcional.
+  salud cuando las necesites.
 - **Cambiar contraseñas** de cualquier usuario y **liberar espacio** de
   versiones antiguas.
 
@@ -75,8 +80,9 @@ sudo bash start.sh
    - **Servidor local:** se abre desde tu red, por ejemplo `http://192.168.1.10`.
    - **VPS:** al principio solo se abre por un túnel SSH (más seguro), hasta
      que añadas tu dominio.
-3. Revisa los datos propuestos (IP, puertos, zona horaria, carpeta de datos) y
-   confirma. La primera instalación tarda unos minutos.
+3. Revisa los datos propuestos (IP, puertos, zona horaria, carpeta de datos y,
+   si quieres, el correo saliente) y confirma. La primera instalación tarda unos
+   minutos.
 
 **3. Entra en Alfresco**
 
@@ -126,6 +132,37 @@ el nombre, activa HTTPS en las dos. La CA es la misma para todas. En la lista
 verás cada dirección con su tipo y estado, por ejemplo
 `https://alfresco.lan · Nombre local · HTTPS local activo`.
 
+## Correo saliente (opcional)
+
+Sin correo, Alfresco funciona igual, pero no envía invitaciones a sitios,
+notificaciones ni avisos de tareas. Puedes configurarlo al instalar o después en
+**Configuración → Correo saliente**. Necesitas los datos de una cuenta de envío
+(SMTP) de tu correo o de un servicio de envío:
+
+| Dato | Ejemplo |
+| --- | --- |
+| Servidor SMTP | `smtp.office365.com`, `smtp.gmail.com`, `mail.tuempresa.com` |
+| Puerto y seguridad | `587` con STARTTLS (lo habitual), `465` con SSL |
+| Usuario y contraseña | La cuenta que envía (Gmail necesita una contraseña de aplicación) |
+| Remitente | `alfresco@tuempresa.com` |
+
+Antes de guardar, el gestor envía un **correo de prueba** para confirmar que los
+datos funcionan. La contraseña se guarda de forma privada y no aparece en los
+registros. Alfresco se reinicia para aplicar el cambio (1–3 minutos).
+
+## Memoria
+
+El gestor asigna la memoria de cada servicio según la RAM del servidor:
+
+| RAM del servidor | Alfresco | Elasticsearch | Transformaciones | Share |
+| --- | --- | --- | --- | --- |
+| 8 GB | 2 GB | 2 GB | 1,5 GB | 1 GB |
+| 16 GB | 4 GB | 3 GB | 2 GB | 1,5 GB |
+| 32 GB o más | 8 GB | 4 GB | 3 GB | 2 GB |
+
+Si amplías la RAM de tu servidor, el ajuste se aplica la próxima vez que inicies
+Alfresco, actualices o cambies la configuración desde el gestor.
+
 ## Volver a abrir el gestor
 
 Desde cualquier carpeta:
@@ -173,6 +210,9 @@ Puedes borrar la carpeta descargada después de instalar.
   los servicios se cierran solos, suele faltar memoria (mínimo 8 GB).
 - **Disco casi lleno:** **Salud → Comprobaciones de salud** avisa a partir del
   80 %. Usa **Salud → Liberar espacio** para borrar versiones antiguas.
+- **No llegan los correos:** en **Configuración → Correo saliente → Enviar correo
+  de prueba** verás el motivo (usuario o contraseña, puerto bloqueado…). Muchos
+  proveedores de VPS bloquean el puerto 25: usa el 587.
 - **La búsqueda no encuentra algo:** en Share, cambia el alcance a
   **Repositorio** y usa `*` para buscar parte de una palabra (`infor*`). Los
   documentos nuevos tardan unos segundos en aparecer.
