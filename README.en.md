@@ -22,8 +22,7 @@ Version **0.1.0** · [MIT License](LICENSE)
   with a strong one before any access is opened, and each installation
   generates its own encryption keys.
 - **Local HTTPS from installation:** own certificates for the server IP or
-  names such as `alfresco.lan`, renewed automatically. It only answers
-  computers on the internal network or your VPN.
+  names such as `alfresco.lan`, renewed automatically.
 - **Update in one step:** the manager tells you when Alfresco publishes a new
   release and applies it after saving the database. If something fails, it goes
   back to the previous version.
@@ -128,8 +127,10 @@ You can use the server **IP** or add **local names** such as `alfresco.lan` in
 
 You can have several addresses at once; all use the same CA. Each certificate
 only covers its exact address. The **primary address** is the one Alfresco uses
-to build links. The server only answers private networks (LAN and VPN), even if
-someone opens a router port by mistake.
+to build links.
+
+Who can reach the server is decided in your network (firewall, router, VPN):
+the manager does not restrict it.
 
 ## Outbound email (optional)
 

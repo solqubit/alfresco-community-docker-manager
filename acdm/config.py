@@ -13,8 +13,6 @@ from .core import Error, LABEL, version_tuple
 
 DEFAULT_HTTP_PORT = 80
 DEFAULT_HTTPS_PORT = 443
-# RFC 1918, loopback, link-local, carrier-grade NAT (Tailscale) and IPv6 ULA/loopback.
-PRIVATE_CLIENTS = 'private_ranges 100.64.0.0/10 169.254.0.0/16'
 
 # Official repositories accepted for every service role. The role is also the Compose
 # service name, matching Alfresco's own community-compose.yaml.
@@ -331,17 +329,13 @@ def default_sni(cfg):
 
 
 def caddyfile(cfg):
-    """Intranet proxy: plain HTTP or HTTPS signed by Caddy's own local CA, for private clients only."""
+    """Intranet proxy: plain HTTP or HTTPS signed by Caddy's own local CA. Who can reach it is a
+    network decision (firewall, router, VPN) of the administrator, not of the manager."""
     sni = default_sni(cfg)
     lines = ['{', '    admin off', '    auto_https disable_redirects'] + ([f'    default_sni {sni}'] if sni else []) + [
              '    servers {', '        trusted_proxies static private_ranges', '    }', '}', '', 'http://:80 {',
              '    handle /acdm-health {', '        respond "ok" 200', '    }']
     for i, entry in enumerate(cfg['domains']):
-        # Only private clients (LAN, VPN such as Tailscale): a router port forward by mistake
-        # must not expose Alfresco to the Internet.
-        lines += [f'    @outside{i} {{', f"        host {entry['host']}",
-                  f'        not remote_ip {PRIVATE_CLIENTS}', '    }',
-                  f'    handle @outside{i} {{', '        respond "Local network only" 403', '    }']
         lines += [f"    @entry{i} host {entry['host']}", f'    handle @entry{i} {{']
         if entry['tls'] != 'off':
             suffix = '' if cfg['https_port'] == 443 else ':' + str(cfg['https_port'])
@@ -353,9 +347,7 @@ def caddyfile(cfg):
     for entry in cfg['domains']:
         if entry['tls'] == 'off':
             continue
-        lines += ['', f"https://{entry['host']} {{", '    tls internal',
-                  '    @outside not remote_ip ' + PRIVATE_CLIENTS, '    handle @outside {',
-                  '        respond "Local network only" 403', '    }', '    handle {']
+        lines += ['', f"https://{entry['host']} {{", '    tls internal', '    handle {']
         lines += ['        ' + line for line in _proxy_route(cfg['maintenance_gate'])]
         lines += ['    }', '}']
     return '\n'.join(lines) + '\n'

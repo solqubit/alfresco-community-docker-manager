@@ -22,8 +22,7 @@ Versión **0.1.0** · [Licencia MIT](LICENSE)
   `admin/admin` se cambia sola por una segura antes de abrir el acceso, y cada
   instalación genera sus propias claves de cifrado.
 - **HTTPS local desde la instalación:** certificados propios para la IP del
-  servidor o nombres como `alfresco.lan`, que se renuevan solos. Solo responde a
-  equipos de la red interna o de tu VPN.
+  servidor o nombres como `alfresco.lan`, que se renuevan solos.
 - **Actualizar con un clic:** el gestor avisa cuando Alfresco publica una
   versión nueva y la aplica guardando antes la base de datos. Si algo falla,
   vuelve a la versión anterior.
@@ -134,8 +133,10 @@ dirección local**:
 
 Puedes tener varias direcciones a la vez; todas usan la misma CA. Cada
 certificado vale solo para su dirección exacta. La **dirección principal** es la
-que usa Alfresco para generar enlaces. El servidor solo responde a equipos de
-redes privadas (LAN y VPN) aunque alguien abra por error un puerto en el router.
+que usa Alfresco para generar enlaces.
+
+Quién puede llegar al servidor lo decides en tu red (cortafuegos, router, VPN):
+el gestor no lo restringe.
 
 ## Correo saliente (opcional)
 

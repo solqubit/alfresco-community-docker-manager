@@ -127,12 +127,12 @@ class HttpsTests(unittest.TestCase):
         self.assertNotIn('acme', text)
         self.assertNotIn('letsencrypt', text)
 
-    def test_only_private_clients_are_served(self):
+    def test_the_proxy_does_not_restrict_client_networks(self):
+        # Exposure is the administrator's network decision (firewall, router, VPN).
         text = caddyfile(self.https_configuration())
-        https_block = text[text.index('https://alfresco.lan {'):]
-        self.assertIn('not remote_ip private_ranges 100.64.0.0/10', https_block)
-        self.assertIn('respond "Local network only" 403', https_block)
-        self.assertEqual(text.count('respond "Local network only" 403'), 3 + 2)
+        self.assertNotIn('remote_ip', text)
+        self.assertNotIn('403', text.replace('respond @blocked "Forbidden" 403', '')
+                         .replace('respond @shareblocked "Forbidden" 403', ''))
 
     def test_primary_https_url_drives_alfresco_share_and_csrf(self):
         cfg = self.https_configuration()
