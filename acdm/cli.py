@@ -32,11 +32,12 @@ def parser():
     sub.add_parser('menu')
     install = sub.add_parser('install')
     install.add_argument('--alfresco-version', help='Exact Alfresco Community version (default: latest official bundle)')
-    install.add_argument('--environment', choices=['lan', 'vps'], default='lan')
     install.add_argument('--address', default='127.0.0.1')
     install.add_argument('--bind', default='127.0.0.1')
     install.add_argument('--http-port', type=int, default=DEFAULT_HTTP_PORT)
     install.add_argument('--https-port', type=int, default=DEFAULT_HTTPS_PORT)
+    install.add_argument('--no-local-https', dest='local_tls', action='store_false',
+                         help='Plain HTTP only (local HTTPS with its own CA is the default)')
     install.add_argument('--timezone', help="Default: the server's timezone")
     install.add_argument('--storage', choices=['named', 'directory'], default='directory')
     install.add_argument('--storage-root', default='/opt/alfresco-community-docker-manager/data')
@@ -51,12 +52,8 @@ def parser():
     child.add_argument('--confirm')
     child = sub.add_parser('domain-add')
     child.add_argument('host')
-    child.add_argument('--mode', choices=['local', 'direct', 'tunnel'], default='local')
-    child.add_argument('--local-https', action='store_true')
-    child.add_argument('--email', default='')
+    child.add_argument('--no-local-https', dest='local_tls', action='store_false')
     child.add_argument('--primary', action='store_true')
-    child.add_argument('--publish-direct', action='store_true', help='Bind TCP 80/443 on all interfaces (direct domain only)')
-    child.add_argument('--external-port', type=int, default=443)
     child.add_argument('--confirm')
     for name in ('domain-remove', 'domain-primary'):
         child = sub.add_parser(name)
@@ -119,7 +116,7 @@ def dispatch(manager, args):
     state = manager.state
     if command == 'install':
         return manager.install(args.alfresco_version, supplied=args.confirm,
-            **{key: getattr(args, key) for key in ('environment', 'address', 'bind', 'http_port', 'https_port', 'timezone', 'storage', 'storage_root')},
+            **{key: getattr(args, key) for key in ('address', 'bind', 'local_tls', 'http_port', 'https_port', 'timezone', 'storage', 'storage_root')},
             language=args.lang or remembered_language(state) or 'es')
     if command == 'versions':
         return [{key: item[key] for key in ('tag', 'version', 'search', 'stale')} for item in manager.installation_options()]
@@ -137,14 +134,10 @@ def dispatch(manager, args):
     if command == 'recover':
         return manager.recover(args.action, args.confirm)
     if command == 'domain-add':
-        manager.add_domain(args.host, mode=args.mode, tls='internal' if args.local_https else 'off',
-                           email=args.email, primary=args.primary, publish_direct=args.publish_direct,
-                           external_port=args.external_port, supplied=args.confirm)
+        manager.add_domain(args.host, tls='internal' if args.local_tls else 'off', primary=args.primary,
+                           supplied=args.confirm)
         cfg = state.load()
-        result = {'access': access_url(cfg, next(e for e in cfg['domains'] if e['host'] == host(args.host)))}
-        if args.mode != 'local':
-            result['certificate'] = 'issued' if manager.wait_certificate(host(args.host)) else 'pending'
-        return result
+        return {'access': access_url(cfg, next(e for e in cfg['domains'] if e['host'] == host(args.host)))}
     if command == 'domain-remove':
         return manager.remove_domain(args.host, args.confirm)
     if command in ('domain-primary', 'network'):

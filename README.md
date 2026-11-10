@@ -2,9 +2,10 @@
 
 # Alfresco Community Docker Manager
 
-Instala y administra **Alfresco Community** en tu servidor Linux desde un menú
-sencillo, sin escribir archivos de configuración. Usa las imágenes oficiales de
-Alfresco con Docker y tiene interfaz en español e inglés.
+Instala y administra **Alfresco Community** como **intranet** en tu servidor
+Linux, desde un menú sencillo y sin escribir archivos de configuración. Usa las
+imágenes oficiales de Alfresco con Docker, HTTPS local desde el primer momento e
+interfaz en español e inglés.
 
 Versión **0.1.0** · [Licencia MIT](LICENSE)
 
@@ -20,8 +21,9 @@ Versión **0.1.0** · [Licencia MIT](LICENSE)
 - **Entrar con seguridad desde el primer momento:** la contraseña de fábrica
   `admin/admin` se cambia sola por una segura antes de abrir el acceso, y cada
   instalación genera sus propias claves de cifrado.
-- **Activar HTTPS:** con tu dominio (certificado gratuito de Let's Encrypt),
-  con Cloudflare Tunnel o en tu red local con una CA propia.
+- **HTTPS local desde la instalación:** certificados propios para la IP del
+  servidor o nombres como `alfresco.lan`, que se renuevan solos. Solo responde a
+  equipos de la red interna o de tu VPN.
 - **Actualizar con un clic:** el gestor avisa cuando Alfresco publica una
   versión nueva y la aplica guardando antes la base de datos. Si algo falla,
   vuelve a la versión anterior.
@@ -76,61 +78,64 @@ sudo bash start.sh
 **2. Sigue el asistente**
 
 1. Elige el idioma.
-2. Elige **Instalar Alfresco** y el tipo de servidor:
-   - **Servidor local:** se abre desde tu red, por ejemplo `http://192.168.1.10`.
-   - **VPS:** al principio solo se abre por un túnel SSH (más seguro), hasta
-     que añadas tu dominio.
-3. Revisa los datos propuestos (IP, puertos, zona horaria, carpeta de datos y,
-   si quieres, el correo saliente) y confirma. La primera instalación tarda unos
-   minutos.
+2. Elige **Instalar Alfresco**. El gestor revisa los requisitos del servidor.
+3. Revisa los datos propuestos (IP del servidor, HTTPS local, puertos, zona
+   horaria, carpeta de datos y, si quieres, el correo saliente) y confirma. La
+   primera instalación tarda unos minutos.
 
 **3. Entra en Alfresco**
 
-Al terminar, el gestor te muestra las direcciones y la **contraseña de admin**.
-Guárdala; también puedes verla después en **Cuentas → Credenciales de acceso**.
+Al terminar, el gestor te muestra las direcciones, la **contraseña de admin** y
+el archivo de la **CA local**. Guarda la contraseña; también puedes verla
+después en **Cuentas → Credenciales de acceso**.
 
 | Aplicación | Dirección |
 | --- | --- |
-| Alfresco Share (interfaz principal) | `http://TU_IP/share/` |
-| Alfresco Content App | `http://TU_IP/content-app/` |
-| Control Center (administración) | `http://TU_IP/control-center/` |
+| Alfresco Share (interfaz principal) | `https://IP_DEL_SERVIDOR/share/` |
+| Alfresco Content App | `https://IP_DEL_SERVIDOR/content-app/` |
+| Control Center (administración) | `https://IP_DEL_SERVIDOR/control-center/` |
 
-En una VPS, abre el túnel desde tu ordenador y entra en
-`http://127.0.0.1:8080/share/`:
+**4. Instala la CA en los equipos**
 
-```bash
-ssh -L 8080:127.0.0.1:80 usuario@IP_DE_TU_VPS
-```
+Para que el navegador no muestre el aviso de «conexión no segura», instala una
+vez el certificado de la CA en cada equipo que use Alfresco. El gestor te indica
+dónde está el archivo (`/opt/alfresco-community-docker-manager/local-ca.crt`), y
+lo puedes volver a exportar en **Dominios y acceso → Exportar CA para HTTPS
+local**.
 
-**4. Añade HTTPS (recomendado)**
+- **Windows:** doble clic en el archivo → *Instalar certificado* → *Equipo
+  local* → *Entidades de certificación raíz de confianza*. En una empresa se
+  puede repartir con una directiva de grupo.
+- **Firefox** usa su propio almacén: *Ajustes → Privacidad y seguridad → Ver
+  certificados → Autoridades → Importar*.
 
-En **Configuración → Dominios y acceso**:
+## HTTPS local
 
-- **Tu dominio en una VPS:** apunta el DNS a tu servidor, abre los puertos 80
-  y 443 y añade el dominio. El certificado se pide y se renueva solo.
-- **Cloudflare Tunnel:** añade el dominio en modo túnel.
-- **Red local:** ver la sección siguiente.
+Alfresco está pensado para la **red interna**: no se publica en internet. Para
+entrar desde fuera, conéctate a la red con la VPN de tu empresa (por ejemplo,
+WireGuard o Tailscale).
 
-### HTTPS en tu red local (IP o nombre local)
+| Certificado | Validez | Renovación |
+| --- | --- | --- |
+| CA raíz (la que instalas en los equipos) | 10 años | Se instala una vez |
+| CA intermedia | 7 días | Automática |
+| Certificado de cada dirección | 12 horas | Automática, sin cortes |
 
-Puedes entrar por la **IP** del servidor o por un **nombre local** como
-`alfresco.lan`. Con la IP basta; el nombre es opcional y solo es más fácil de
-recordar.
+Puedes entrar por la **IP** del servidor o añadir **nombres locales** como
+`alfresco.lan` en **Dominios y acceso → Direcciones locales → Añadir otra
+dirección local**:
 
-1. En **Dominios y acceso → Direcciones locales → Añadir otra dirección local**,
-   escribe la IP o el nombre y marca **Usar HTTPS local: Sí**. El gestor crea el
-   certificado automáticamente; no tienes que generar nada.
-2. Si usas un **nombre**, haz que apunte a tu servidor: en el router o DNS de
-   la red (por ejemplo `alfresco.lan → 192.168.1.10`) o en el archivo `hosts`
-   de cada equipo. Evita los nombres que terminan en `.local`; mejor `.lan` o
+1. Escribe la IP o el nombre. **Usar HTTPS local** viene activado; el
+   certificado se crea solo.
+2. Si es un **nombre**, haz que apunte al servidor en el router o DNS de la red
+   (por ejemplo `alfresco.lan → 192.168.1.10`) o en el archivo `hosts` de cada
+   equipo. Evita los nombres que terminan en `.local`; mejor `.lan` o
    `.internal`.
-3. Exporta la CA en **Exportar CA para HTTPS local** e instálala una vez en
-   cada equipo para que el navegador no muestre avisos.
 
-Cada certificado vale solo para la dirección exacta: si entras por la IP y por
-el nombre, activa HTTPS en las dos. La CA es la misma para todas. En la lista
-verás cada dirección con su tipo y estado, por ejemplo
-`https://alfresco.lan · Nombre local · HTTPS local activo`.
+Puedes tener varias direcciones a la vez; todas usan la misma CA. Cada
+certificado vale solo para su dirección exacta. La **dirección principal** es la
+que usa Alfresco para generar enlaces. El servidor solo responde a equipos de
+redes privadas (LAN y VPN) aunque alguien abra por error un puerto en el router.
 
 ## Correo saliente (opcional)
 
@@ -202,22 +207,25 @@ descargada: configuración, documentos, base de datos, certificados y registros.
 Puedes borrar la carpeta descargada después de instalar.
 
 > El gestor no hace copias de seguridad completas. Para protegerte de la pérdida
-> del servidor, usa las instantáneas de tu VPS o una copia externa del disco.
+> del servidor, usa instantáneas de la máquina virtual o una copia externa del
+> disco.
 
 ## Ayuda
 
 - **Algo no arranca:** abre **Servicio → Registros** y elige el servicio. Si
   los servicios se cierran solos, suele faltar memoria (mínimo 8 GB).
+- **El navegador dice «conexión no segura»:** falta instalar la CA en ese
+  equipo (paso 4), o entras por una dirección sin HTTPS local activado.
 - **Disco casi lleno:** **Salud → Comprobaciones de salud** avisa a partir del
   80 %. Usa **Salud → Liberar espacio** para borrar versiones antiguas.
 - **No llegan los correos:** en **Configuración → Correo saliente → Enviar correo
-  de prueba** verás el motivo (usuario o contraseña, puerto bloqueado…). Muchos
-  proveedores de VPS bloquean el puerto 25: usa el 587.
+  de prueba** verás el motivo (usuario o contraseña, puerto bloqueado…). Usa el
+  puerto 587 si el 25 está bloqueado en tu red.
 - **La búsqueda no encuentra algo:** en Share, cambia el alcance a
   **Repositorio** y usa `*` para buscar parte de una palabra (`infor*`). Los
   documentos nuevos tardan unos segundos en aparecer.
 - **Comandos sin menú:** `sudo bash start.sh --help` muestra todas las acciones
-  (estado, actualizar, dominios, registros…).
+  (estado, actualizar, direcciones, registros…).
 
 [Pruebas realizadas](docs/VALIDACION.es.md) · Proyecto independiente basado en
 GLPI Docker Manager y Nextcloud Docker Manager. Alfresco, PostgreSQL,

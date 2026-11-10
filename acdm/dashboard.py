@@ -68,7 +68,7 @@ def dashboard(ui, state, *, last='', notice='', notice_style='accent', status=No
         stopped = any(row.get('State') != 'running' for row in services)
         label = ('service_stopped' if stopped else 'service_ready' if repository.get('ready')
                  else 'service_starting_up' if repository.get('container') == 'running' else 'service_unavailable')
-        summary = ui.t(label) + ' · ' + access_url(cfg) + '/share/ · ' + ui.t('environment_' + cfg['environment'])
+        summary = ui.t(label) + ' · ' + access_url(cfg) + '/share/'
         tone = 'warning' if label != 'service_ready' or pending else 'accent'
     else:
         ui.context = str(state.path)

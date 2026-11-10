@@ -2,9 +2,10 @@
 
 # Alfresco Community Docker Manager
 
-Install and manage **Alfresco Community** on your Linux server from a simple
-menu, without writing configuration files. It uses Alfresco's official Docker
-images and speaks English and Spanish.
+Install and manage **Alfresco Community** as an **intranet** on your Linux
+server, from a simple menu and without writing configuration files. It uses
+Alfresco's official Docker images, local HTTPS from the start, and speaks
+English and Spanish.
 
 Version **0.1.0** · [MIT License](LICENSE)
 
@@ -18,10 +19,11 @@ Version **0.1.0** · [MIT License](LICENSE)
   release and sets everything up: Share, Content App, Control Center,
   Elasticsearch search and a PostgreSQL database.
 - **Stay safe from the start:** the factory `admin/admin` password is replaced
-  with a strong one before any access is opened, and each installation generates
-  its own encryption keys.
-- **Turn on HTTPS:** with your own domain (free Let's Encrypt certificate),
-  through Cloudflare Tunnel, or on your local network with a private CA.
+  with a strong one before any access is opened, and each installation
+  generates its own encryption keys.
+- **Local HTTPS from installation:** own certificates for the server IP or
+  names such as `alfresco.lan`, renewed automatically. It only answers
+  computers on the internal network or your VPN.
 - **Update in one step:** the manager tells you when Alfresco publishes a new
   release and applies it after saving the database. If something fails, it goes
   back to the previous version.
@@ -73,59 +75,61 @@ sudo bash start.sh
 **2. Follow the wizard**
 
 1. Choose the language.
-2. Choose **Install Alfresco** and the kind of server:
-   - **Local server:** opened from your network, for example `http://192.168.1.10`.
-   - **VPS:** at first only reachable through an SSH tunnel (safer), until you
-     add your domain.
-3. Review the proposed values (IP, ports, timezone, data folder and, if you
-   want, outbound email) and confirm. The first installation takes a few minutes.
+2. Choose **Install Alfresco**. The manager checks the server requirements.
+3. Review the proposed values (server IP, local HTTPS, ports, timezone, data
+   folder and, if you want, outbound email) and confirm. The first installation
+   takes a few minutes.
 
 **3. Sign in to Alfresco**
 
-When it finishes, the manager shows the addresses and the **admin password**.
-Keep it safe; you can show it again in **Accounts → Access credentials**.
+When it finishes, the manager shows the addresses, the **admin password** and
+the **local CA** file. Keep the password safe; you can show it again in
+**Accounts → Access credentials**.
 
 | Application | Address |
 | --- | --- |
-| Alfresco Share (main interface) | `http://YOUR_IP/share/` |
-| Alfresco Content App | `http://YOUR_IP/content-app/` |
-| Control Center (administration) | `http://YOUR_IP/control-center/` |
+| Alfresco Share (main interface) | `https://SERVER_IP/share/` |
+| Alfresco Content App | `https://SERVER_IP/content-app/` |
+| Control Center (administration) | `https://SERVER_IP/control-center/` |
 
-On a VPS, open the tunnel from your computer and browse to
-`http://127.0.0.1:8080/share/`:
+**4. Install the CA on your computers**
 
-```bash
-ssh -L 8080:127.0.0.1:80 user@YOUR_VPS_IP
-```
+To avoid the browser's "not secure" warning, install the CA certificate once on
+each computer that uses Alfresco. The manager tells you where the file is
+(`/opt/alfresco-community-docker-manager/local-ca.crt`), and you can export it
+again in **Domains and access → Export CA for local HTTPS**.
 
-**4. Add HTTPS (recommended)**
+- **Windows:** double-click the file → *Install certificate* → *Local machine* →
+  *Trusted Root Certification Authorities*. Companies can deploy it with a group
+  policy.
+- **Firefox** uses its own store: *Settings → Privacy & Security → View
+  certificates → Authorities → Import*.
 
-In **Settings → Domains and access**:
+## Local HTTPS
 
-- **Your domain on a VPS:** point DNS to your server, open ports 80 and 443
-  and add the domain. The certificate is requested and renewed automatically.
-- **Cloudflare Tunnel:** add the domain in tunnel mode.
-- **Local network:** see the next section.
+Alfresco is meant for the **internal network**: it is not published on the
+Internet. To work from outside, connect to the network through your company VPN
+(for example WireGuard or Tailscale).
 
-### HTTPS on your local network (IP or local name)
+| Certificate | Validity | Renewal |
+| --- | --- | --- |
+| Root CA (installed on computers) | 10 years | Installed once |
+| Intermediate CA | 7 days | Automatic |
+| Certificate of each address | 12 hours | Automatic, no downtime |
 
-You can reach the server by its **IP** or by a **local name** such as
-`alfresco.lan`. The IP is enough; a name is optional and just easier to
-remember.
+You can use the server **IP** or add **local names** such as `alfresco.lan` in
+**Domains and access → Local addresses → Add another local address**:
 
-1. In **Domains and access → Local addresses → Add another local address**, type
-   the IP or the name and set **Use local HTTPS: Yes**. The manager creates the
-   certificate automatically; there is nothing to generate.
-2. If you use a **name**, point it to your server: in the router or network DNS
-   (for example `alfresco.lan → 192.168.1.10`) or in each computer's `hosts`
-   file. Avoid names ending in `.local`; prefer `.lan` or `.internal`.
-3. Export the CA in **Export CA for local HTTPS** and install it once on each
-   computer so browsers do not warn.
+1. Type the IP or name. **Use local HTTPS** is on; the certificate is created
+   automatically.
+2. For a **name**, point it to the server in the router or network DNS (for
+   example `alfresco.lan → 192.168.1.10`) or in each computer's `hosts` file.
+   Avoid names ending in `.local`; prefer `.lan` or `.internal`.
 
-Each certificate only covers its exact address: if you use both the IP and the
-name, enable HTTPS on both. The CA is the same for all. The list shows each
-address with its type and state, for example
-`https://alfresco.lan · Local name · Local HTTPS on`.
+You can have several addresses at once; all use the same CA. Each certificate
+only covers its exact address. The **primary address** is the one Alfresco uses
+to build links. The server only answers private networks (LAN and VPN), even if
+someone opens a router port by mistake.
 
 ## Outbound email (optional)
 
@@ -196,22 +200,24 @@ downloaded folder: configuration, documents, database, certificates and logs.
 You can delete the downloaded folder after installing.
 
 > The manager does not make full backups. To protect yourself against losing the
-> server, use your VPS snapshots or an external copy of the disk.
+> server, use virtual machine snapshots or an external copy of the disk.
 
 ## Help
 
 - **Something does not start:** open **Service → Logs** and pick the service.
   If services stop on their own, memory is usually short (8 GB minimum).
+- **The browser says "not secure":** the CA is not installed on that computer
+  (step 4), or you are using an address without local HTTPS.
 - **Disk almost full:** **Health → Health checks** warns from 80 %. Use
   **Health → Free up space** to remove old versions.
 - **Emails do not arrive:** **Settings → Outbound email → Send test message**
-  shows why (username or password, blocked port…). Many VPS providers block
-  port 25: use 587.
+  shows why (username or password, blocked port…). Use port 587 if port 25 is
+  blocked on your network.
 - **Search does not find something:** in Share, set the scope to
   **Repository** and use `*` to match part of a word (`infor*`). New documents
   take a few seconds to appear.
 - **Commands without the menu:** `sudo bash start.sh --help` lists every action
-  (status, update, domains, logs…).
+  (status, update, addresses, logs…).
 
 [Validation report (Spanish)](docs/VALIDACION.es.md) · Independent project based
 on GLPI Docker Manager and Nextcloud Docker Manager. Alfresco, PostgreSQL,

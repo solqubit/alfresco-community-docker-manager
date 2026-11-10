@@ -13,8 +13,8 @@ import urllib.parse
 from . import archive
 from .catalog import Catalog, same_major
 from . import mailer
-from .config import (access_url, applications, engine_of, host, image_tag, initial, memory_tier, port, prefer_first_public,
-                     public_host, roles, start_order, validate, validate_mail)
+from .config import (access_url, applications, engine_of, host, image_tag, initial, memory_tier, port, roles,
+                     start_order, validate, validate_mail)
 from .core import Error, Runner, confirm, human, read_json, stage, version_tuple
 from .docker import Engine
 from .maintenance import Maintenance
@@ -153,7 +153,7 @@ class Manager(Maintenance):
         planned = dict(id='preflight', project='acdm_preflight', bind=settings.get('bind', '127.0.0.1'),
                        http_port=port(settings.get('http_port', 80)), https_port=port(settings.get('https_port', 443)))
         print(f"Alfresco {bundle['version']} ({bundle['tag']}); search: {bundle['search']}; "
-              f"{settings.get('environment', 'lan')}; storage: {settings.get('storage', 'directory')}")
+              f"local HTTPS: {settings.get('local_tls', True)}; storage: {settings.get('storage', 'directory')}")
         confirm('INSTALL', supplied)
         preflight = Engine(self.state, planned)
         preflight.check_ports()
@@ -204,9 +204,15 @@ class Manager(Maintenance):
             raise Error(f'No se pudo cambiar la contraseña inicial de admin (HTTP {code}) / '
                         f'Could not replace the initial admin password (HTTP {code})')
 
-    @staticmethod
-    def credentials(cfg):
-        return {'applications': applications(cfg), 'user': 'admin', 'admin_password': cfg['admin_password']}
+    def credentials(self, cfg):
+        result = {'applications': applications(cfg), 'user': 'admin', 'admin_password': cfg['admin_password']}
+        if any(entry['tls'] != 'off' for entry in cfg['domains']):
+            # The local CA browsers must trust once; exported again each time to keep its path current.
+            try:
+                result['ca_certificate'] = str(Engine(self.state, cfg).ca_certificate())
+            except Error:
+                pass
+        return result
 
     # ------------------------------------------------------------------ status
     def status(self):
@@ -411,22 +417,15 @@ class Manager(Maintenance):
                 pass
             raise
 
-    def add_domain(self, name, *, mode='local', tls='off', email='', primary=False, publish_direct=False, external_port=443, supplied=None):
+    def add_domain(self, name, *, tls='internal', primary=False, supplied=None):
+        """Another local IP or name (alfresco.lan) for the intranet, with or without local HTTPS."""
         cfg = self.state.load()
-        name = host(name) if mode == 'local' else public_host(name)
+        name = host(name)
         if any(e['host'] == name for e in cfg['domains']):
             raise Error('La dirección ya existe / Address already exists')
-        auto_primary = prefer_first_public(cfg, mode)
-        cfg['domains'].append(dict(host=name, kind='local' if mode == 'local' else 'public',
-                                   mode=mode, tls=tls if mode == 'local' else 'acme', email=email))
-        if mode != 'local':
-            cfg['domains'][-1]['external_port'] = port(external_port)
-        if primary or auto_primary:
+        cfg['domains'].append(dict(host=name, kind='local', mode='local', tls=tls, email=''))
+        if primary:
             cfg['primary'] = name
-        if publish_direct:
-            if mode != 'direct':
-                raise Error('Publicar TCP 80/443 requiere el modo dominio directo / Publishing TCP 80/443 requires direct-domain mode')
-            cfg.update(bind='0.0.0.0', http_port=80, https_port=443)
         self.settings(cfg, supplied)
         return cfg
 

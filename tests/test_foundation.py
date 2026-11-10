@@ -102,42 +102,50 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class HttpsTests(unittest.TestCase):
+    """Intranet only: local addresses with HTTPS from Caddy's own CA."""
+
     def https_configuration(self):
         cfg = configuration()
         cfg['maintenance_gate'] = False
-        cfg['domains'].append(dict(host='docs.example.com', kind='public', mode='direct', tls='acme',
-                                   email='ops@example.com', external_port=443))
         cfg['domains'].append(dict(host='alfresco.lan', kind='local', mode='local', tls='internal', email=''))
-        cfg['primary'] = 'docs.example.com'
+        cfg['domains'].append(dict(host='192.168.1.10', kind='local', mode='local', tls='off', email=''))
+        cfg['primary'] = 'alfresco.lan'
         validate(cfg)
         return cfg
 
-    def test_public_domain_uses_acme_and_redirects_http(self):
-        text = caddyfile(self.https_configuration())
-        self.assertIn('https://docs.example.com {', text)
-        self.assertIn('issuer acme', text)
-        self.assertIn('email ops@example.com', text)
-        self.assertIn('redir https://docs.example.com{uri} 308', text)
-        self.assertIn('Strict-Transport-Security', text)
+    def test_new_installations_use_local_https_by_default(self):
+        cfg = configuration()
+        self.assertEqual(cfg['domains'][0]['tls'], 'internal')
+        self.assertEqual(access_url(cfg), 'https://127.0.0.1')
+        self.assertIn('default_sni 127.0.0.1', caddyfile(cfg))
 
-    def test_local_https_uses_internal_ca(self):
+    def test_local_https_uses_internal_ca_and_redirects_http(self):
         text = caddyfile(self.https_configuration())
         block = text[text.index('https://alfresco.lan {'):]
         self.assertIn('tls internal', block)
+        self.assertIn('redir https://alfresco.lan{uri} 308', text)
+        self.assertNotIn('acme', text)
+        self.assertNotIn('letsencrypt', text)
+
+    def test_only_private_clients_are_served(self):
+        text = caddyfile(self.https_configuration())
+        https_block = text[text.index('https://alfresco.lan {'):]
+        self.assertIn('not remote_ip private_ranges 100.64.0.0/10', https_block)
+        self.assertIn('respond "Local network only" 403', https_block)
+        self.assertEqual(text.count('respond "Local network only" 403'), 3 + 2)
 
     def test_primary_https_url_drives_alfresco_share_and_csrf(self):
         cfg = self.https_configuration()
-        self.assertEqual(access_url(cfg), 'https://docs.example.com')
+        self.assertEqual(access_url(cfg), 'https://alfresco.lan')
         options = java_options(cfg)
         self.assertIn('-Dalfresco.protocol=https', options)
-        self.assertIn('-Dshare.host=docs.example.com', options)
-        self.assertIn('-Daos.baseUrlOverwrite=https://docs.example.com/alfresco/aos', options)
+        self.assertIn('-Dshare.host=alfresco.lan', options)
         origin, referer = csrf_patterns(cfg)
-        for url in ('https://docs.example.com', 'https://alfresco.lan', 'http://127.0.0.1'):
+        for url in ('https://alfresco.lan', 'http://192.168.1.10', 'https://127.0.0.1'):
             self.assertRegex(url, '^' + origin + '$')
             self.assertRegex(url + '/share/page', '^' + referer + '$')
         self.assertNotRegex('https://evil.example.org', '^' + origin + '$')
-        self.assertEqual(applications(cfg)['share'], 'https://docs.example.com/share/')
+        self.assertEqual(applications(cfg)['share'], 'https://alfresco.lan/share/')
 
     def test_share_csrf_values_survive_the_image_sed_substitution(self):
         cfg = self.https_configuration()
@@ -148,13 +156,11 @@ class HttpsTests(unittest.TestCase):
         self.assertEqual(unescaped, origin)
         self.assertNotRegex(environment['CSRF_FILTER_ORIGIN'], r'(?<!\\)\|')
 
-    def test_tunnel_domain_is_plain_http_origin_with_acme_certificate(self):
-        cfg = configuration()
-        cfg['domains'].append(dict(host='docs.example.net', kind='public', mode='tunnel', tls='acme', email='', external_port=443))
-        validate(cfg)
-        text = caddyfile(cfg)
-        self.assertIn('https://docs.example.net {', text)
-        self.assertNotIn('redir https://docs.example.net', text)
+    def test_ip_without_server_name_gets_its_certificate(self):
+        cfg = self.https_configuration()
+        self.assertNotIn('default_sni', caddyfile(cfg).split('servers')[0].replace('default_sni 127.0.0.1', ''))
+        cfg['primary'] = '127.0.0.1'
+        self.assertIn('default_sni 127.0.0.1', caddyfile(cfg))
 
     def test_maintenance_gate_answers_503_and_internal_apis_are_blocked(self):
         cfg = configuration()
@@ -168,9 +174,16 @@ class HttpsTests(unittest.TestCase):
         self.assertFalse(blocked.match('/alfresco/api/-default-/public/alfresco/versions/1/people'))
         self.assertLess(text.index('respond @blocked'), text.index('reverse_proxy alfresco:8080'))
 
-    def test_public_address_requires_https(self):
+    def test_public_domains_tunnels_and_acme_are_rejected(self):
+        for entry in (dict(host='docs.example.com', kind='public', mode='direct', tls='acme', email=''),
+                      dict(host='docs.example.net', kind='public', mode='tunnel', tls='acme', email=''),
+                      dict(host='alfresco.lan', kind='local', mode='local', tls='acme', email='')):
+            cfg = configuration()
+            cfg['domains'].append(entry)
+            with self.assertRaises(Error, msg=entry['mode']):
+                validate(cfg)
         cfg = configuration()
-        cfg['domains'].append(dict(host='docs.example.com', kind='public', mode='direct', tls='off', email=''))
+        cfg['environment'] = 'vps'
         with self.assertRaises(Error):
             validate(cfg)
 

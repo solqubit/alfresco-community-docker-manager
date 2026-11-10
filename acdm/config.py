@@ -115,16 +115,6 @@ def host(value):
     return value
 
 
-def public_host(value):
-    value = host(value)
-    try:
-        ipaddress.ip_address(value)
-    except ValueError:
-        if '.' in value and not value.endswith(('.local', '.internal', '.localhost', '.home.arpa')):
-            return value
-    raise Error('Se necesita un dominio público / A public DNS hostname is required')
-
-
 def port(value):
     value = int(value)
     if not 1 <= value <= 65535:
@@ -198,7 +188,8 @@ def validate(cfg):
         raise Error('Image/application version mismatch')
     if cfg['search'] != engine_of(cfg['images']):
         raise Error('Search engine mismatch')
-    if cfg['environment'] not in ('lan', 'vps') or cfg['storage'] not in ('named', 'directory'):
+    # Intranet only: no public domains, Let's Encrypt or tunnels.
+    if cfg['environment'] != 'lan' or cfg['storage'] not in ('named', 'directory'):
         raise Error('Invalid installation environment/storage')
     ipaddress.IPv4Address(cfg['bind'])
     if port(cfg['http_port']) == port(cfg['https_port']):
@@ -227,17 +218,10 @@ def validate(cfg):
     if not entries or len(entries) > 32 or len({e['host'] for e in entries}) != len(entries):
         raise Error('Se necesita al menos una dirección única / Unique access addresses required')
     for entry in entries:
-        if entry['host'] != host(entry['host']) or entry['kind'] not in ('local', 'public'):
-            raise Error('Invalid access entry')
-        if entry['tls'] not in ('off', 'internal', 'acme') or entry['mode'] not in ('local', 'direct', 'tunnel'):
-            raise Error('Invalid HTTPS/access mode')
-        if entry['kind'] == 'public':
-            public_host(entry['host'])
-            port(entry.get('external_port', 443))
-            if entry['tls'] != 'acme' or entry['mode'] == 'local':
-                raise Error('Public access requires HTTPS')
-        if entry.get('email') and not re.fullmatch(r'[^\s@{}"\\]+@[^\s@{}"\\]+\.[^\s@{}"\\]+', entry['email']):
-            raise Error('Invalid email')
+        if entry['host'] != host(entry['host']) or entry['kind'] != 'local' or entry['mode'] != 'local':
+            raise Error('Solo se admiten direcciones locales / Only local addresses are supported')
+        if entry['tls'] not in ('off', 'internal'):
+            raise Error('Invalid local HTTPS mode')
     if cfg['primary'] not in [e['host'] for e in entries]:
         raise Error('Primary address must be allowed')
     for secret in ('db_password', 'search_secret', 'mq_password'):
@@ -257,12 +241,12 @@ def volume_names(identity):
     return {role: f'acdm_{identity}_{role}' for role in VOLUMES}
 
 
-def initial(images, *, environment='lan', bind='127.0.0.1', address=None,
+def initial(images, *, bind='127.0.0.1', address=None, local_tls=True,
             http_port=DEFAULT_HTTP_PORT, https_port=DEFAULT_HTTPS_PORT, timezone='UTC', language='es',
             storage='directory', storage_root=None, subnet=None):
     identity = secrets.token_hex(8)
     cfg = dict(format=1, id=identity, project='acdm_' + identity, version=image_tag(images['alfresco']),
-               images=images, search=engine_of(images), environment=environment, bind=bind,
+               images=images, search=engine_of(images), environment='lan', bind=bind,
                http_port=port(http_port), https_port=port(https_port), timezone=timezone,
                language=language, storage=storage,
                storage_root=storage_root or '/opt/alfresco-community-docker-manager/data',
@@ -271,27 +255,18 @@ def initial(images, *, environment='lan', bind='127.0.0.1', address=None,
                db_password=secrets.token_urlsafe(30), search_secret=secrets.token_urlsafe(30),
                mq_password=secrets.token_urlsafe(30), admin_password=secrets.token_urlsafe(15),
                maintenance_gate=True, primary=host(address or bind),
-               domains=[dict(host=host(address or bind), kind='local', tls='off', mode='local', email='')],
+               domains=[dict(host=host(address or bind), kind='local', tls='internal' if local_tls else 'off',
+                             mode='local', email='')],
                status='starting', retention=3, data_device=None)
     validate(cfg)
     return cfg
-
-
-def prefer_first_public(cfg, mode):
-    """Promote the first public address while retaining later user preferences."""
-    current = next(entry for entry in cfg['domains'] if entry['host'] == cfg['primary'])
-    return (mode in ('tunnel', 'direct') and current['kind'] == 'local'
-            and not any(entry['kind'] == 'public' for entry in cfg['domains']))
 
 
 def endpoint(cfg, entry=None):
     """(scheme, host, port) a browser uses for an access entry."""
     entry = entry or next(e for e in cfg['domains'] if e['host'] == cfg['primary'])
     secure = entry['tls'] != 'off'
-    value = cfg['https_port'] if secure else cfg['http_port']
-    if entry['kind'] == 'public':
-        value = entry.get('external_port', 443)
-    return ('https' if secure else 'http'), entry['host'], value
+    return ('https' if secure else 'http'), entry['host'], cfg['https_port'] if secure else cfg['http_port']
 
 
 def access_url(cfg, entry=None):
@@ -323,10 +298,9 @@ BLOCKED = (r'^/alfresco(;[^/]*)?/(service|s|wcservice|wcs)(;[^/]*)?/(api(;[^/]*)
            r'/(api(;[^/]*)?/solr|remoteadm|-default-(;[^/]*)?/proxy(;[^/]*)?/[^/]+/api)(;[^/]*)?(/|$)')
 
 
-def _proxy_route(gate, *, hsts=False):
-    headers = ['header Strict-Transport-Security "max-age=15552000"'] if hsts else []
+def _proxy_route(gate):
     if gate:
-        return headers + ['respond "Alfresco maintenance" 503']
+        return ['respond "Alfresco maintenance" 503']
     # Same exclusions as Alfresco's reference proxy: Solr, remote admin and Prometheus APIs
     # are internal and must never be reachable from browsers. «route» keeps this literal
     # order (Caddy would otherwise sort handle blocks before respond).
@@ -345,47 +319,44 @@ def _proxy_route(gate, *, hsts=False):
         'handle_path /admin/* {', '    reverse_proxy control-center:8080', '}',
         'handle /share/* {', '    reverse_proxy share:8080', '}',
         'reverse_proxy alfresco:8080']
-    return headers + ['route {'] + ['    ' + line for line in routes] + ['}']
+    return ['route {'] + ['    ' + line for line in routes] + ['}']
+
+
+def default_sni(cfg):
+    """Browsers send no server name when they open an IP address, and inside Docker the proxy
+    only sees its container address: tell Caddy which certificate answers those connections."""
+    addresses = [entry['host'] for entry in cfg['domains'] if entry['tls'] != 'off']
+    ips = [name for name in addresses if re.fullmatch(r'[0-9.]+', name)]
+    return cfg['primary'] if cfg['primary'] in ips else (ips[0] if ips else None)
 
 
 def caddyfile(cfg):
-    lines = ['{', '    admin off', '    auto_https disable_redirects', '    servers {',
-             '        trusted_proxies static private_ranges', '    }', '}', '', 'http://:80 {',
-             '    handle /acdm-health {', '        respond "ok" 200', '    }',
-             '    handle /.well-known/acme-challenge/* {', '        respond "Unknown ACME challenge" 404', '    }']
+    """Intranet proxy: plain HTTP or HTTPS signed by Caddy's own local CA, for private clients only."""
+    sni = default_sni(cfg)
+    lines = ['{', '    admin off', '    auto_https disable_redirects'] + ([f'    default_sni {sni}'] if sni else []) + [
+             '    servers {', '        trusted_proxies static private_ranges', '    }', '}', '', 'http://:80 {',
+             '    handle /acdm-health {', '        respond "ok" 200', '    }']
     for i, entry in enumerate(cfg['domains']):
-        plain = not (entry['tls'] != 'off' and entry['mode'] != 'tunnel')
-        if plain:
-            # Plain-HTTP routes (LAN addresses and the tunnel origin) are for private
-            # clients only: with the proxy published on 0.0.0.0, a spoofed Host header
-            # from the internet would otherwise bypass the tunnel and HTTPS.
-            lines += [f'    @outside{i} {{', f"        host {entry['host']}",
-                      f'        not remote_ip {PRIVATE_CLIENTS}', '    }',
-                      f'    handle @outside{i} {{', '        respond "Use HTTPS" 403', '    }']
+        # Only private clients (LAN, VPN such as Tailscale): a router port forward by mistake
+        # must not expose Alfresco to the Internet.
+        lines += [f'    @outside{i} {{', f"        host {entry['host']}",
+                  f'        not remote_ip {PRIVATE_CLIENTS}', '    }',
+                  f'    handle @outside{i} {{', '        respond "Local network only" 403', '    }']
         lines += [f"    @entry{i} host {entry['host']}", f'    handle @entry{i} {{']
-        if not plain:
-            external = entry.get('external_port', 443) if entry['kind'] == 'public' else cfg['https_port']
-            suffix = '' if external == 443 else ':' + str(external)
+        if entry['tls'] != 'off':
+            suffix = '' if cfg['https_port'] == 443 else ':' + str(cfg['https_port'])
             lines += [f'        redir https://{entry["host"]}{suffix}{{uri}} 308']
         else:
-            lines += ['        ' + line for line in _proxy_route(cfg['maintenance_gate'], hsts=entry['kind'] == 'public')]
+            lines += ['        ' + line for line in _proxy_route(cfg['maintenance_gate'])]
         lines += ['    }']
     lines += ['    respond "Unknown host" 404', '}']
     for entry in cfg['domains']:
         if entry['tls'] == 'off':
             continue
-        lines += ['', f"https://{entry['host']} {{"]
-        if entry['tls'] == 'internal':
-            lines += ['    tls internal']
-        else:
-            lines += ['    tls {', '        issuer acme {', '            dir https://acme-v02.api.letsencrypt.org/directory',
-                      '            disable_tlsalpn_challenge']
-            if entry.get('email'):
-                lines += ['            email ' + entry['email']]
-            lines += ['        }', '    }']
-        lines += ['    handle /.well-known/acme-challenge/* {',
-                  '        reverse_proxy 127.0.0.1:80', '    }', '    handle {']
-        lines += ['        ' + line for line in _proxy_route(cfg['maintenance_gate'], hsts=entry['kind'] == 'public')]
+        lines += ['', f"https://{entry['host']} {{", '    tls internal',
+                  '    @outside not remote_ip ' + PRIVATE_CLIENTS, '    handle @outside {',
+                  '        respond "Local network only" 403', '    }', '    handle {']
+        lines += ['        ' + line for line in _proxy_route(cfg['maintenance_gate'])]
         lines += ['    }', '}']
     return '\n'.join(lines) + '\n'
 

@@ -78,18 +78,6 @@ class Maintenance:
                 path.unlink()
         return result
 
-    def wait_certificate(self, name, timeout=90):
-        """After adding a public domain: a 308 redirect alone does not prove HTTPS works.
-        False means not issued yet (DNS, ports 80/443 or the tunnel); Caddy keeps retrying."""
-        engine = Engine(self.state)
-        until = time.monotonic() + timeout
-        while True:
-            if any(name in item['names'] for item in self.read_certificates(engine)):
-                return True
-            if time.monotonic() > until:
-                return False
-            time.sleep(5)
-
     def cleanup_candidates(self):
         """Volumes this installation no longer uses (left by restores and updates), Docker images
         earlier revisions used and configuration revisions older than the five newest."""
@@ -183,7 +171,8 @@ class Maintenance:
             raise Error('Certificado aún no emitido: %s / Certificate not yet issued: %s' % ((', '.join(missing),) * 2))
         for entry in engine.cfg['domains']:
             if entry['tls'] != 'off':
-                threshold = 3600 if entry['tls'] == 'internal' else 7 * 86400
+                # Local certificates last 12 hours and Caddy renews them well before.
+                threshold = 3600
                 valid = [c['seconds_remaining'] for c in certificates if entry['host'] in c['names']]
                 if not valid or max(valid) < threshold:
                     raise Error('Certificado a punto de caducar; revisa los registros de Caddy: %s / Certificate is near expiry; inspect Caddy logs: %s' % ((entry['host'],) * 2))

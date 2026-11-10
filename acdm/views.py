@@ -22,16 +22,13 @@ def domain_summary(ui, cfg):
         values = [access_url(cfg, entry) for entry in cfg['domains'] if entry['kind'] == kind]
         return ', '.join(values[:2]) + (' …' if len(values) > 2 else '') if values else ui.t('domains_not_configured')
     return '\n'.join((ui.t('domains_summary_primary', access_url(cfg)),
-                      ui.t('domains_summary_local', addresses('local')),
-                      ui.t('domains_summary_public', addresses('public'))))
+                      ui.t('domains_summary_local', addresses('local'))))
 
 
 def address_kind(entry_or_host):
-    """ip, name (local hostname) or public (Internet domain)."""
+    """ip or name (local hostname such as alfresco.lan)."""
     import ipaddress
-    entry = entry_or_host if isinstance(entry_or_host, dict) else {'host': entry_or_host, 'kind': 'local'}
-    if entry.get('kind') == 'public':
-        return 'public'
+    entry = entry_or_host if isinstance(entry_or_host, dict) else {'host': entry_or_host}
     try:
         ipaddress.IPv4Address(entry['host'])
         return 'ip'
@@ -41,9 +38,8 @@ def address_kind(entry_or_host):
 
 def address_label(ui, cfg, entry):
     """https://alfresco.lan · Local name · Local HTTPS on · Primary."""
-    parts = [access_url(cfg, entry), ui.t('address_' + address_kind(entry))]
-    if entry['kind'] == 'local':
-        parts.append(ui.t('tls_on' if entry['tls'] != 'off' else 'tls_off'))
+    parts = [access_url(cfg, entry), ui.t('address_' + address_kind(entry)),
+             ui.t('tls_on' if entry['tls'] != 'off' else 'tls_off')]
     if entry['host'] == cfg['primary']:
         parts.append(ui.t('domains_current_primary'))
     return ' · '.join(parts)
@@ -63,8 +59,8 @@ def local_name_notes(ui, name, server_ip, tls):
 
 def domain_actions(ui):
     rows = []
-    for key in ('add_local', 'add_direct', 'add_tunnel', 'remove', 'primary', 'local_tls', 'ca', 'network'):
-        tone = {'add_tunnel': 'accent', 'add_direct': 'accent', 'remove': 'warning', 'primary': 'ok'}.get(key, '')
+    for key in ('add_local', 'remove', 'primary', 'local_tls', 'ca', 'network'):
+        tone = {'remove': 'warning', 'primary': 'ok', 'ca': 'accent'}.get(key, '')
         rows.append((key, [(ui.t(key), tone), ('  ' + ui.t('domains_tag_' + key), 'dim>')], tone))
     return rows
 
