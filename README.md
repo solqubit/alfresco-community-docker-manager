@@ -103,8 +103,28 @@ En **Configuración → Dominios y acceso**:
 - **Tu dominio en una VPS:** apunta el DNS a tu servidor, abre los puertos 80
   y 443 y añade el dominio. El certificado se pide y se renueva solo.
 - **Cloudflare Tunnel:** añade el dominio en modo túnel.
-- **Red local:** activa **HTTPS local** y, para evitar avisos del navegador,
-  instala en tus equipos la CA que puedes exportar desde el mismo menú.
+- **Red local:** ver la sección siguiente.
+
+### HTTPS en tu red local (IP o nombre local)
+
+Puedes entrar por la **IP** del servidor o por un **nombre local** como
+`alfresco.lan`. Con la IP basta; el nombre es opcional y solo es más fácil de
+recordar.
+
+1. En **Dominios y acceso → Direcciones locales → Añadir otra dirección local**,
+   escribe la IP o el nombre y marca **Usar HTTPS local: Sí**. El gestor crea el
+   certificado automáticamente; no tienes que generar nada.
+2. Si usas un **nombre**, haz que apunte a tu servidor: en el router o DNS de
+   la red (por ejemplo `alfresco.lan → 192.168.1.10`) o en el archivo `hosts`
+   de cada equipo. Evita los nombres que terminan en `.local`; mejor `.lan` o
+   `.internal`.
+3. Exporta la CA en **Exportar CA para HTTPS local** e instálala una vez en
+   cada equipo para que el navegador no muestre avisos.
+
+Cada certificado vale solo para la dirección exacta: si entras por la IP y por
+el nombre, activa HTTPS en las dos. La CA es la misma para todas. En la lista
+verás cada dirección con su tipo y estado, por ejemplo
+`https://alfresco.lan · Nombre local · HTTPS local activo`.
 
 ## Volver a abrir el gestor
 

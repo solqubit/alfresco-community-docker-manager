@@ -26,6 +26,41 @@ def domain_summary(ui, cfg):
                       ui.t('domains_summary_public', addresses('public'))))
 
 
+def address_kind(entry_or_host):
+    """ip, name (local hostname) or public (Internet domain)."""
+    import ipaddress
+    entry = entry_or_host if isinstance(entry_or_host, dict) else {'host': entry_or_host, 'kind': 'local'}
+    if entry.get('kind') == 'public':
+        return 'public'
+    try:
+        ipaddress.IPv4Address(entry['host'])
+        return 'ip'
+    except ValueError:
+        return 'name'
+
+
+def address_label(ui, cfg, entry):
+    """https://alfresco.lan · Local name · Local HTTPS on · Primary."""
+    parts = [access_url(cfg, entry), ui.t('address_' + address_kind(entry))]
+    if entry['kind'] == 'local':
+        parts.append(ui.t('tls_on' if entry['tls'] != 'off' else 'tls_off'))
+    if entry['host'] == cfg['primary']:
+        parts.append(ui.t('domains_current_primary'))
+    return ' · '.join(parts)
+
+
+def local_name_notes(ui, name, server_ip, tls):
+    """What the administrator still has to do outside the manager for a local address."""
+    notes = []
+    if address_kind(name) == 'name':
+        notes.append(ui.t('local_name_dns', name, server_ip))
+        if name.endswith('.local'):
+            notes.append(ui.t('local_name_mdns'))
+    if tls:
+        notes.append(ui.t('local_tls_ca'))
+    return notes
+
+
 def domain_actions(ui):
     rows = []
     for key in ('add_local', 'add_direct', 'add_tunnel', 'remove', 'primary', 'local_tls', 'ca', 'network'):

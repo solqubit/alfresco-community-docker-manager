@@ -100,8 +100,27 @@ In **Settings → Domains and access**:
 - **Your domain on a VPS:** point DNS to your server, open ports 80 and 443
   and add the domain. The certificate is requested and renewed automatically.
 - **Cloudflare Tunnel:** add the domain in tunnel mode.
-- **Local network:** enable **local HTTPS** and, to avoid browser warnings,
-  install on your computers the CA you can export from the same menu.
+- **Local network:** see the next section.
+
+### HTTPS on your local network (IP or local name)
+
+You can reach the server by its **IP** or by a **local name** such as
+`alfresco.lan`. The IP is enough; a name is optional and just easier to
+remember.
+
+1. In **Domains and access → Local addresses → Add another local address**, type
+   the IP or the name and set **Use local HTTPS: Yes**. The manager creates the
+   certificate automatically; there is nothing to generate.
+2. If you use a **name**, point it to your server: in the router or network DNS
+   (for example `alfresco.lan → 192.168.1.10`) or in each computer's `hosts`
+   file. Avoid names ending in `.local`; prefer `.lan` or `.internal`.
+3. Export the CA in **Export CA for local HTTPS** and install it once on each
+   computer so browsers do not warn.
+
+Each certificate only covers its exact address: if you use both the IP and the
+name, enable HTTPS on both. The CA is the same for all. The list shows each
+address with its type and state, for example
+`https://alfresco.lan · Local name · Local HTTPS on`.
 
 ## Open the manager again
 

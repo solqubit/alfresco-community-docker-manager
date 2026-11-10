@@ -17,7 +17,7 @@ from .i18n import messages, remember_language, remembered_language
 from .operations import AdminAuthError
 from .system import host_info, host_timezone
 from .terminal_ui import INFO, SEPARATOR, Terminal
-from .views import (SERVICES, bundle_detail, domain_actions, domain_summary,
+from .views import (SERVICES, address_kind, address_label, bundle_detail, domain_actions, domain_summary, local_name_notes,
                     operation_summary, pair, release_rows, result_rows, service_names, update_rows)
 
 
@@ -47,9 +47,9 @@ class Form:
 
     def display(self, key, value=None):
         value = self.data[key] if value is None else value
-        if key in ('environment', 'storage', 'publish'):
+        if key in ('environment', 'storage', 'publish', 'local_tls'):
             return self.ui.t(('environment_' + value) if key == 'environment' else
-                             ('yes' if value else 'no') if key == 'publish' else value)
+                             ('yes' if value else 'no') if key in ('publish', 'local_tls') else value)
         return str(value) if value != '' else self.ui.t('optional' if key == 'email' else 'pending_value')
 
     def normalize(self, key, value):
@@ -126,11 +126,14 @@ class Form:
 
     def edit(self, key):
         data, value = self.data, None
-        if key in ('environment', 'storage', 'publish'):
-            values = {'environment': ['lan', 'vps'], 'storage': ['directory', 'named'], 'publish': [False, True]}[key]
-            value = self.view.pick(key, [(v, self.display(key, v), 'warning' if key == 'publish' and v else '')
-                                        for v in values], selected=values.index(data[key]),
-                                   help_text=self.ui.t('environment_help') if key == 'environment' else '')
+        if key in ('environment', 'storage', 'publish', 'local_tls'):
+            values = {'environment': ['lan', 'vps'], 'storage': ['directory', 'named'], 'publish': [False, True],
+                      'local_tls': [False, True]}[key]
+            value = self.view.pick('field_local_tls' if key == 'local_tls' else key,
+                                   [(v, self.display(key, v), 'warning' if key == 'publish' and v else '')
+                                    for v in values], selected=values.index(data[key]),
+                                   help_text=self.ui.t('environment_help' if key == 'environment' else
+                                                       'field_help_local_tls' if key == 'local_tls' else ''))
         elif key == 'version':
             value = self.view.pick('version', release_rows(self.ui, self.bundles),
                                    selected=next((i for i, b in enumerate(self.bundles) if b['version'] == data['version']), 0),
@@ -149,7 +152,17 @@ class Form:
                                        hint=self.ui.t('field_help_' + key), default=self.original[key])
         else:
             preview = None
-            if key in ('http_port', 'https_port'):
+            if key == 'name' and not data.get('public'):
+                def preview(text):
+                    # Tell apart an IP from a local name while it is typed.
+                    try:
+                        name = host(text)
+                    except Error:
+                        return ''
+                    kind = address_kind(name)
+                    hint = self.ui.t('preview_' + kind)
+                    return hint + (' ' + self.ui.t('local_name_mdns') if kind == 'name' and name.endswith('.local') else '')
+            elif key in ('http_port', 'https_port'):
                 def preview(text):
                     try:
                         number = port(text)
@@ -163,7 +176,7 @@ class Form:
         if value is not None:
             self.data[key] = value
             self.invalid = ''
-            self.notice, self.notice_style = self.ui.t('field_saved', self.ui.t(key)), 'ok'
+            self.notice, self.notice_style = self.ui.t('field_saved', self.ui.msg.get('field_' + key, self.ui.t(key))), 'ok'
             if key == 'environment' and value == 'vps' and (data.get('bind'), data.get('address')) != ('127.0.0.1',) * 2:
                 self.data.update(bind='127.0.0.1', address='127.0.0.1')
                 self.notice = self.ui.t('vps_loopback_set')
@@ -374,18 +387,19 @@ class Controller:
             if not self.domain_directory(action, mode):
                 return
             cfg = self.state.load()
-            fields = ['name'] + (['email', 'external_port'] if mode != 'local' else [])
+            fields = ['name'] + (['email', 'external_port'] if mode != 'local' else ['local_tls'])
             if mode == 'direct':
                 fields.append('publish')
-            data = dict(name='', public=mode != 'local', email='', external_port=443, publish=False)
+            data = dict(name='', public=mode != 'local', email='', external_port=443, publish=False, local_tls=False)
             form = Form(self.view, 'domain_new_' + mode, data, fields, submit='save_access')
-            form.notice = self.term.t('domain_new_help')
+            form.notice = self.term.t('domain_new_local_help' if mode == 'local' else 'domain_new_help')
             if prefer_first_public(cfg, mode):
                 form.notice += '\n' + self.term.t('public_first_primary')
             draft = form.run()
             if draft is None:
                 return
             self.view.run(action, lambda: self.manager.add_domain(draft['name'], mode=mode, email=draft['email'],
+                          tls='internal' if mode == 'local' and draft['local_tls'] else 'off',
                           external_port=draft['external_port'], publish_direct=draft['publish']),
                           context=[(self.term.t('name'), draft['name'])])
             name = draft['name']
@@ -397,6 +411,11 @@ class Controller:
                 if self.state.load()['primary'] == name:
                     note = self.term.t('tunnel_primary_saved')
             style = 'ok'
+            if mode == 'local':
+                server = cfg['bind'] if cfg['bind'] not in ('0.0.0.0', '127.0.0.1') else host_info()['address']
+                notes = local_name_notes(self.term, name, server, draft['local_tls'])
+                if notes:
+                    note, style = '\n'.join([note] + notes), 'warning' if address_kind(name) == 'name' else 'ok'
             if mode != 'local' and not self.view.run('check_certificate', lambda: self.manager.wait_certificate(name)):
                 note, style = note + '\n' + self.term.t('certificate_pending'), 'warning'
             self.report(action, url, notice=note, style=style)
@@ -424,16 +443,11 @@ class Controller:
             entries = [entry for entry in cfg['domains'] if action != 'local_tls' or entry['kind'] == 'local']
             if not entries:
                 return self.report(action, self.term.t('no_addresses'), style='warning')
-            def label(entry):
-                text = access_url(cfg, entry)
-                if action == 'local_tls':
-                    text += ' · ' + self.term.t('tls_on' if entry['tls'] != 'off' else 'tls_off')
-                if entry['host'] == cfg['primary']:
-                    text += ' · ' + self.term.t('domains_current_primary')
-                return text
             name = self.view.pick(action, [
-                (entry['host'], label(entry), 'ok' if entry['host'] == cfg['primary'] else '') for entry in entries],
-                selected=next((i for i, entry in enumerate(entries) if entry['host'] == cfg['primary']), 0))
+                (entry['host'], address_label(self.term, cfg, entry), 'ok' if entry['host'] == cfg['primary'] else '')
+                for entry in entries],
+                selected=next((i for i, entry in enumerate(entries) if entry['host'] == cfg['primary']), 0),
+                notice=self.term.t('local_tls_notice') if action == 'local_tls' else '')
             if name is None:
                 return
             if action == 'remove':
@@ -452,10 +466,7 @@ class Controller:
             entries = [entry for entry in cfg['domains'] if entry.get('mode', 'local') == mode]
             rows = []
             for entry in entries:
-                label = access_url(cfg, entry)
-                if entry['host'] == cfg['primary']:
-                    label += ' · ' + self.term.t('domains_current_primary')
-                rows.append(('entry:' + entry['host'], label, 'ok'))
+                rows.append(('entry:' + entry['host'], address_label(self.term, cfg, entry), 'ok'))
             if rows:
                 rows.append((SEPARATOR, '', ''))
             rows.append(('new', '+ ' + self.term.t('domain_new_' + mode), 'accent'))
@@ -474,9 +485,7 @@ class Controller:
                 return
             rows = [] if cfg['primary'] == name else [('primary', self.term.t('domain_make_primary'), 'ok')]
             rows.append(('remove', self.term.t('remove'), 'warning'))
-            notice = self.term.t('domain_saved', access_url(cfg, entry))
-            if cfg['primary'] == name:
-                notice += '\n' + self.term.t('domains_current_primary')
+            notice = self.term.t('domain_saved', address_label(self.term, cfg, entry))
             choice = self.menu('domain_details', rows, notice=notice)
             if choice is None:
                 return
