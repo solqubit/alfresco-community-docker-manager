@@ -44,15 +44,56 @@ class RequirementTests(unittest.TestCase):
         self.assertEqual(status(result, 'memory'), 'warning')
         self.assertEqual(low_memory(result), '')
 
-    def test_disk_minimum_blocks(self):
-        result = rows(free=20)
-        self.assertEqual(status(result, 'disk'), 'error')
-        self.assertTrue(any('30 GB' in message for message in errors(result)))
+    def note(self, result, key):
+        return next(row for row in result if row['key'] == key)['note']
 
-    def test_disk_that_would_pass_elasticsearch_limit_warns(self):
+    def test_disk_minimum_blocks(self):
+        result = rows(free=10)
+        self.assertEqual(status(result, 'disk'), 'error')
+        self.assertTrue(any('15 GB' in message for message in errors(result)))
+
+    def test_disk_that_would_pass_elasticsearch_limit_blocks(self):
+        # 160 GB used + 12 GB of installation = 86 % of 200 GB.
         result = rows(free=40, total=200)
-        self.assertEqual(status(result, 'disk'), 'warning')
-        self.assertEqual(next(row for row in result if row['key'] == 'disk')['note'], 'req_disk_full')
+        self.assertEqual(status(result, 'disk'), 'error')
+        self.assertEqual(self.note(result, 'disk'), 'req_disk_full')
+        self.assertTrue(any('85 %' in message for message in errors(result)))
+
+    def test_clean_30_gb_ubuntu_installs_with_update_warning(self):
+        # Ubuntu Server with Docker uses about 7 GB of a 30 GB disk.
+        result = rows(free=23, total=30)
+        self.assertEqual(errors(result), [])
+        self.assertEqual(self.note(result, 'disk'), 'req_disk_warning')
+
+    def test_clean_50_gb_disk_is_comfortable(self):
+        result = rows(free=43, total=50)
+        self.assertEqual(status(result, 'disk'), 'ok')
+
+    def test_update_space_counts_new_images_and_elasticsearch_limit(self):
+        disk = lambda path: Usage(50 * GIB, 30 * GIB, 20 * GIB)
+        self.assertTrue(requirements.update_space('/', 10 * GIB, usage=disk)[0])
+        # 30 + 14 GB = 88 % of the disk: Elasticsearch would stop indexing.
+        self.assertFalse(requirements.update_space('/', 14 * GIB, usage=disk)[0])
+        # Not enough free space for the download itself.
+        small = lambda path: Usage(200 * GIB, 195 * GIB, 5 * GIB)
+        self.assertFalse(requirements.update_space('/', 4 * GIB, usage=small)[0])
+
+    def test_update_estimate_uses_changed_components_only(self):
+        from unittest.mock import Mock, patch
+        from acdm.core import Error
+        from acdm.operations import Manager
+        manager = Manager.__new__(Manager)
+        engine = Mock()
+        engine.cfg = {'images': {'share': 'share-image', 'alfresco': 'repo-image'}}
+        engine.inspect.side_effect = lambda kind, ref: {'Size': GIB}
+        with patch.object(Manager, 'docker_root', return_value='/'), \
+                patch('acdm.operations.requirements.update_space', return_value=(True, 50 * GIB)) as space:
+            self.assertEqual(manager.check_update_space(engine, ['share']), int(1.4 * GIB))
+        space.assert_called_once_with('/', int(1.4 * GIB))
+        with patch.object(Manager, 'docker_root', return_value='/'), \
+                patch('acdm.operations.requirements.update_space', return_value=(False, GIB)):
+            with self.assertRaisesRegex(Error, 'Liberar espacio'):
+                manager.check_update_space(engine, ['share', 'alfresco', 'batch-indexing'])
 
     def test_separate_data_disk_is_checked(self):
         result = rows(data='/tmp', data_free=2)

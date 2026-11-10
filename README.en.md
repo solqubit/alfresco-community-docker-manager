@@ -33,7 +33,7 @@ Version **0.1.0** · [MIT License](LICENSE)
 | | Minimum | Recommended |
 | --- | --- | --- |
 | Memory (RAM) | **8 GB** | 16 GB |
-| Free disk | **30 GB** + your documents | 50 GB + your documents |
+| Disk | **15 GB free** | A **50 GB** disk (or more, depending on your documents) |
 | Processors | 2 | 4 |
 | System | 64-bit Linux (amd64 or arm64) with **sudo** access | |
 
@@ -46,9 +46,14 @@ Before installing, the manager checks your server and shows the result:
 
 - **Memory:** with less than 8 GB it warns that Alfresco will probably fail to
   start for lack of memory. You may continue at your own risk.
-- **Disk:** with less than 30 GB free it does not install; the images alone
-  take about 11 GB. It also warns if the disk would end up above 85 %, where
-  search stops indexing.
+- **Disk:** the installation takes about 12 GB. With less than 15 GB free, or
+  if the disk would end up above 85 % (where search stops indexing), it does not
+  install. With less than 35 GB free it warns that updates will need
+  «Free up space» first.
+
+For example, a 30 GB disk with a fresh Ubuntu leaves about 23 GB free:
+Alfresco fits, but each update will need some space freed first. With a 50 GB
+disk you update without worrying and keep about 13–20 GB for documents.
 
 ## Get started
 
@@ -117,6 +122,11 @@ component update is available. When you apply it, the manager:
 1. Stops Alfresco briefly and saves the database.
 2. Updates every component that changes, together.
 3. Starts everything and checks that it responds.
+
+Before starting, the manager estimates the space the new images need (from
+about 1 GB when only Share changes to about 13 GB when almost everything does).
+If there is not enough, it does not start and asks you to use
+**Health → Free up space**. Previous versions use disk until you do.
 
 Your documents are never touched. If an update is interrupted or fails, open
 **Recover pending operation** to resume it or go back to the previous version.

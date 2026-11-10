@@ -14,7 +14,7 @@ from . import archive
 from .catalog import Catalog, same_major
 from .config import (access_url, applications, engine_of, host, image_tag, initial, port, prefer_first_public,
                      public_host, roles, start_order, validate)
-from .core import Error, Runner, confirm, read_json, stage, version_tuple
+from .core import Error, Runner, confirm, human, read_json, stage, version_tuple
 from .docker import Engine
 from .maintenance import Maintenance
 from . import requirements
@@ -83,6 +83,21 @@ class Manager(Maintenance):
         data = (storage_root or str(self.state.path / 'data')) if storage == 'directory' else None
         return requirements.evaluate(info.get('memory', 0), info.get('cpus', 0), info.get('architecture', ''),
                                      self.docker_root(), data)
+
+    def check_update_space(self, engine, roles):
+        """New images coexist with the old ones until «Free up space»: refuse to start an update
+        that would fill the disk or pass the 85 % where Elasticsearch stops indexing."""
+        needed = 0
+        for role in roles:
+            info = engine.inspect('image', engine.cfg['images'][role]) if role in engine.cfg['images'] else None
+            # A new version is about the size of the current one; Docker 29 also keeps its compressed copy.
+            needed += int(info['Size'] * 1.4) if info and info.get('Size') else 2 * requirements.GIB
+        enough, free = requirements.update_space(self.docker_root(), needed)
+        if not enough:
+            raise Error(f'Espacio insuficiente para actualizar: las imágenes nuevas necesitan unos {human(needed)} y hay '
+                        f'{human(free)} libres. Usa «Liberar espacio» y vuelve a intentarlo / Not enough disk to update: '
+                        f'the new images need about {human(needed)} and {human(free)} is free. Use «Free up space» and retry')
+        return needed
 
     def check_requirements(self, storage='directory', storage_root=None):
         rows = self.requirements(storage, storage_root)
@@ -431,6 +446,7 @@ class Manager(Maintenance):
             raise Error('Versión no disponible para actualizar / Version not available as an update')
         images_source = next(b for b in self.catalog.bundles() if b['tag'] == bundle['tag'])['images']
         changes = bundle['changes']
+        self.check_update_space(live, [role for role in changes if role in images_source])
         confirm('UPDATE-' + bundle['version'], supplied,
                 ', '.join(f'{role} {old or "—"} → {new or "—"}' for role, (old, new) in sorted(changes.items())))
         wanted = {}
@@ -493,6 +509,7 @@ class Manager(Maintenance):
         old = image_tag(cfg['images'][component])
         if tag_numbers(image_tag(target)) <= tag_numbers(old):
             raise Error('El componente ya está actualizado / Component is current')
+        self.check_update_space(live, [component])
         confirm('UPDATE-' + component.upper(), supplied, f'{component}: {old} -> {image_tag(target)}')
         changed = copy.deepcopy(cfg)
         changed['images'][component] = live.pin({component: target})[component]

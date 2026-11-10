@@ -34,7 +34,7 @@ Versión **0.1.0** · [Licencia MIT](LICENSE)
 | | Mínimo | Recomendado |
 | --- | --- | --- |
 | Memoria RAM | **8 GB** | 16 GB |
-| Disco libre | **30 GB** + tus documentos | 50 GB + tus documentos |
+| Disco | **15 GB libres** | Disco de **50 GB** (o más, según tus documentos) |
 | Procesadores | 2 | 4 |
 | Sistema | Linux de 64 bits (amd64 o arm64) con acceso **sudo** | |
 
@@ -48,9 +48,15 @@ Antes de instalar, el gestor revisa tu servidor y te muestra el resultado:
 - **Memoria:** con menos de 8 GB te avisa de que es probable que Alfresco no
   pueda arrancar por falta de memoria. Puedes continuar bajo tu
   responsabilidad.
-- **Disco:** con menos de 30 GB libres no deja instalar; las imágenes ya ocupan
-  unos 11 GB. También avisa si el disco quedaría por encima del 85 %, porque a
-  partir de ahí la búsqueda deja de indexar.
+- **Disco:** la instalación ocupa unos 12 GB. Con menos de 15 GB libres, o si el
+  disco quedaría por encima del 85 % (a partir de ahí la búsqueda deja de
+  indexar), no deja instalar. Con menos de 35 GB libres avisa de que, para
+  actualizar, tendrás que liberar espacio antes.
+
+Por ejemplo, un disco de 30 GB con Ubuntu recién instalado deja unos 23 GB
+libres: Alfresco cabe, pero cada actualización necesitará liberar espacio. Con
+un disco de 50 GB actualizas sin preocuparte y te quedan unos 13–20 GB para
+documentos.
 
 ## Empezar
 
@@ -119,6 +125,11 @@ nueva de Alfresco o de sus componentes. Al aplicarla, el gestor:
 1. Detiene Alfresco un momento y guarda la base de datos.
 2. Actualiza a la vez todos los componentes que cambian.
 3. Arranca y comprueba que todo responde.
+
+Antes de empezar, el gestor calcula el espacio que necesitan las imágenes
+nuevas (desde ~1 GB si solo cambia Share hasta ~13 GB si cambia casi todo). Si
+no hay sitio, no empieza y te pide usar **Salud → Liberar espacio**. Las
+versiones anteriores ocupan disco hasta que lo usas.
 
 Tus documentos no se tocan. Si la actualización se interrumpe o falla, entra en
 **Recuperar operación pendiente** para continuarla o volver a la versión
