@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+tests/.runtime/
+.env
+.venv/
+*.acdm.tar
+*.log

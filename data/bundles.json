@@ -1,0 +1,39 @@
+{
+  "source": "https://github.com/Alfresco/acs-deployment (docker-compose/community-compose.yaml)",
+  "bundles": [
+    {
+      "tag": "v10.9.0",
+      "version": "26.2.0",
+      "images": {
+        "alfresco": "alfresco/alfresco-content-repository-community:26.2.0",
+        "transform-core-aio": "alfresco/alfresco-transform-core-aio:5.4.5",
+        "share": "alfresco/alfresco-share:26.2.4",
+        "postgres": "postgres:17.9",
+        "elasticsearch": "elasticsearch:8.17.10",
+        "batch-indexing": "alfresco/alfresco-elasticsearch-batch-indexing:5.9.0",
+        "activemq": "alfresco/alfresco-activemq:6.2.9-jre17-rockylinux8",
+        "content-app": "alfresco/alfresco-content-app:8.0.0",
+        "control-center": "quay.io/alfresco/alfresco-control-center:11.0.0",
+        "proxy": "caddy:2"
+      },
+      "search": "elasticsearch"
+    },
+    {
+      "tag": "v10.8.0",
+      "version": "26.2.0",
+      "images": {
+        "alfresco": "alfresco/alfresco-content-repository-community:26.2.0",
+        "transform-core-aio": "alfresco/alfresco-transform-core-aio:5.4.4",
+        "share": "alfresco/alfresco-share:26.2.2",
+        "postgres": "postgres:17.9",
+        "elasticsearch": "elasticsearch:8.17.10",
+        "batch-indexing": "alfresco/alfresco-elasticsearch-batch-indexing:5.8.0",
+        "activemq": "alfresco/alfresco-activemq:6.2.9-jre17-rockylinux8",
+        "content-app": "alfresco/alfresco-content-app:8.0.0",
+        "control-center": "quay.io/alfresco/alfresco-control-center:11.0.0",
+        "proxy": "caddy:2"
+      },
+      "search": "elasticsearch"
+    }
+  ]
+}
